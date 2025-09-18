@@ -2,7 +2,7 @@
 
 "use client";
 
-import { mockInterviews } from "../data/mockInterview"; // Adjust the path as needed
+import { mockInterviews } from "./mockInterview"; // Adjust the path as needed
 import { useState } from "react";
 
 export default function DashboardPage() {
