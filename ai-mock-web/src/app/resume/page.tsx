@@ -167,6 +167,10 @@ export default function ResumeUploadPage() {
 
       const data = await response.json();
       console.log("Backend response:", data);
+      // Persist session payload for Interview page to pick up immediately
+      try {
+        sessionStorage.setItem('interviewSession', JSON.stringify(data));
+      } catch {}
       
       // Store form data in sessionStorage to avoid re-filling
       sessionStorage.setItem('interviewData', JSON.stringify({
@@ -178,28 +182,26 @@ export default function ResumeUploadPage() {
       
       router.push("/Interview");
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(`Error: ${err.message}`);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setError(`Error: ${message}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
-      <div className="w-full max-w-2xl p-8 bg-white rounded-lg shadow-md">
-        <h1 className="text-3xl font-bold text-center text-gray-800 mb-6">
-          Prepare for Your Interview
-        </h1>
-        <p className="text-center text-gray-600 mb-8">
-          Upload your resume and the job details to get started.
-        </p>
+    <div className="relative min-h-screen p-4 flex items-center justify-center">
+      <div className="animated-grid" />
+      <div className="relative w-full max-w-2xl p-8 rounded-lg glass-effect neon-border">
+        <h1 className="page-title text-center mb-6 text-white">Prepare for Your Interview</h1>
+        <p className="text-white/80 text-center mb-8">Upload your resume and the job details to get started.</p>
 
         <form className="space-y-6" onSubmit={handleSubmit}>
           {/* Resume Upload Section */}
           <div>
-            <label htmlFor="resume" className="block text-lg font-medium text-gray-700 mb-2">
+            <label htmlFor="resume" className="block text-lg font-medium text-white mb-2">
               1. Upload Your Resume (PDF or DOCX)
             </label>
             <div
@@ -216,10 +218,10 @@ export default function ResumeUploadPage() {
               />
               <label
                 htmlFor="resume"
-                className="flex flex-col items-center justify-center w-full h-full text-center text-gray-500 cursor-pointer"
+                className="flex flex-col items-center justify-center w-full h-full text-center text-white/80 cursor-pointer"
               >
                 {resumeFile ? (
-                  <p className="text-green-600 font-medium">{resumeFile.name} uploaded.</p>
+                  <p className="text-green-300 font-medium">{resumeFile.name} uploaded.</p>
                 ) : (
                   <p>Drag and drop or click to upload</p>
                 )}
@@ -229,7 +231,7 @@ export default function ResumeUploadPage() {
 
           {/* Job Description Section */}
           <div>
-            <label htmlFor="jobDescription" className="block text-lg font-medium text-gray-700 mb-2">
+            <label htmlFor="jobDescription" className="block text-lg font-medium text-white mb-2">
               2. Paste Job Description
             </label>
             <textarea
@@ -237,7 +239,7 @@ export default function ResumeUploadPage() {
               rows={8}
               value={jobDescription}
               onChange={(e) => setJobDescription(e.target.value)}
-              className="w-full p-4 border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 text-black placeholder-gray-400"
+              className="w-full p-4 border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/60 bg-white/5 border-white/20"
               placeholder="Paste the job description here..."
             />
           </div>
@@ -245,14 +247,14 @@ export default function ResumeUploadPage() {
           {/* Job Role, Years of Experience, Company Name */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label htmlFor="companyName" className="block text-lg font-medium text-gray-700 mb-2">
+              <label htmlFor="companyName" className="block text-lg font-medium text-white mb-2">
                 3. Company Name
               </label>
               <select
                 id="companyName"
                 value={companyName}
                 onChange={(e) => setCompanyName(e.target.value)}
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white bg-white/5 border-white/20"
               >
                 <option value="">Select a company</option>
                 <option>Amazon</option>
@@ -271,14 +273,14 @@ export default function ResumeUploadPage() {
               </select>
             </div>
             <div>
-              <label htmlFor="jobRole" className="block text-lg font-medium text-gray-700 mb-2">
+              <label htmlFor="jobRole" className="block text-lg font-medium text-white mb-2">
                 4. Your Job Role
               </label>
               <select
                 id="jobRole"
                 value={jobRole}
                 onChange={(e) => setJobRole(e.target.value)}
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white bg-white/5 border-white/20"
               >
                 <option value="">Select a role</option>
                 <option>Software Engineer</option>
@@ -296,14 +298,14 @@ export default function ResumeUploadPage() {
               </select>
             </div>
             <div>
-              <label htmlFor="yearsOfExperience" className="block text-lg font-medium text-gray-700 mb-2">
+              <label htmlFor="yearsOfExperience" className="block text-lg font-medium text-white mb-2">
                 5. Years of Experience
               </label>
               <select
                 id="yearsOfExperience"
                 value={yearsOfExperience === '' ? '' : String(yearsOfExperience)}
                 onChange={(e) => setYearsOfExperience(e.target.value === '' ? '' : Number(e.target.value))}
-                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-black"
+                className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white bg-white/5 border-white/20"
               >
                 <option value="">Select years</option>
                 <option value="0">0</option>
@@ -324,9 +326,9 @@ export default function ResumeUploadPage() {
           {error && <p className="text-red-500 text-sm text-center">{error}</p>}
 
           {/* ATS Review Section */}
-          <div className="border-t pt-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-3">📊 Resume Analysis (Optional)</h3>
-            <p className="text-sm text-gray-600 mb-4">
+          <div className="border-t border-white/20 pt-6">
+            <h3 className="card-title mb-3 text-white">📊 Resume Analysis (Optional)</h3>
+            <p className="text-sm text-white/80 mb-4">
               Get an ATS (Applicant Tracking System) score and detailed feedback on how well your resume matches the job description.
             </p>
             <button
@@ -450,17 +452,17 @@ export default function ResumeUploadPage() {
         )}
 
         {planPreview && (
-          <div className="mt-8 p-6 bg-gray-50 border rounded-lg">
-            <h2 className="text-xl font-semibold text-gray-800">Interview Plan Preview</h2>
-            <p className="mt-2 text-gray-700">
+          <div className="mt-8 p-6 rounded-lg border border-white/20 bg-white/5">
+            <h2 className="section-title text-white">Interview Plan Preview</h2>
+            <p className="mt-2 text-white/90">
               <span className="font-medium">Role:</span> {planPreview.inferred_role || '—'} | {" "}
               <span className="font-medium">Experience:</span> {planPreview.inferred_years_of_experience} yrs | {" "}
               <span className="font-medium">Company:</span> {planPreview.inferred_company || '—'}
             </p>
             
             {/* Generation Source Indicator */}
-            <div className="mt-3 p-3 rounded-lg bg-blue-50 border border-blue-200">
-              <div className="flex items-center gap-2">
+            <div className="mt-3 p-3 rounded-lg border border-white/20 bg-white/5">
+              <div className="flex items-center gap-2 text-white">
                 {planPreview.is_ai_generated ? (
                   <>
                     <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -478,18 +480,18 @@ export default function ResumeUploadPage() {
 
             <div className="mt-4 space-y-3">
               {planPreview.rounds.map((r, idx) => (
-                <div key={idx} className="p-4 bg-white border rounded-lg flex items-center justify-between">
+                <div key={idx} className="p-4 rounded-lg border border-white/20 bg-white/5 flex items-center justify-between">
                   <div>
-                    <p className="font-medium text-gray-900">{r.title} <span className="ml-2 text-xs uppercase tracking-wide text-gray-500">{r.type}</span></p>
-                    <p className="text-gray-600 text-sm">Questions: {r.question_count}</p>
+                    <p className="font-medium text-white">{r.title} <span className="ml-2 text-xs uppercase tracking-wide text-white/70">{r.type}</span></p>
+                    <p className="text-white/80 text-sm">Questions: {r.question_count}</p>
                   </div>
-                  <p className="text-gray-700 font-medium">~ {r.estimated_minutes} min</p>
+                  <p className="text-white font-medium">~ {r.estimated_minutes} min</p>
                 </div>
               ))}
             </div>
             <div className="mt-4 flex items-center justify-between text-gray-800">
-              <p className="font-medium">Total Questions: {planPreview.total_questions}</p>
-              <p className="font-semibold">Estimated Duration: ~ {planPreview.total_estimated_minutes} minutes</p>
+              <p className="font-medium text-white">Total Questions: {planPreview.total_questions}</p>
+              <p className="font-semibold text-white">Estimated Duration: ~ {planPreview.total_estimated_minutes} minutes</p>
             </div>
           </div>
         )}
