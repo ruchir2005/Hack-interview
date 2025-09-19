@@ -1,11 +1,11 @@
 import os
 import json
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import google.generativeai as genai
 from PyPDF2 import PdfReader
 from docx import Document
@@ -959,8 +959,13 @@ async def start_interview(
         "job_role": effective_role,
         "years_of_experience": effective_yoe,
         "extracted_resume_text": "",
+        # Keep both legacy and new keys for compatibility
         "current_round": 0,
         "current_question": 0,
+        "interview_plan": interview_plan,
+        "current_round_index": 0,
+        "current_question_index": 0,
+        "interview_history": [],
         "questions_and_answers": [],
         "is_complete": False,
         "start_time": datetime.now(),
