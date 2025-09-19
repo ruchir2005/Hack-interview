@@ -1,9 +1,14 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Union
-import json
 import os
+import json
+from typing import List, Optional
+from datetime import datetime
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from pydantic import BaseModel
+import google.generativeai as genai
+from PyPDF2 import PdfReader
+from docx import Document
 from dotenv import load_dotenv
 import base64
 import docx
@@ -11,6 +16,7 @@ from PyPDF2 import PdfReader
 
 # Import the Gemini SDK
 import google.generativeai as genai
+from voice_service import VoiceService
 
 # Load environment variables
 load_dotenv()
@@ -24,9 +30,9 @@ genai.configure(api_key=API_KEY)
 
 # Initialize the Gemini model - using flash for lower quota usage
 model = genai.GenerativeModel('gemini-1.5-flash-latest')
-tts_model = genai.GenerativeModel('gemini-2.5-flash-preview-tts') # Dedicated TTS model
 
 app = FastAPI()
+voice_service = VoiceService()
 
 # Loosen CORS for local development including IDE/browser preview proxies
 app.add_middleware(
@@ -38,6 +44,7 @@ app.add_middleware(
 )
 
 session_data: Dict[str, Any] = {}
+sessions: Dict[str, Any] = {}  # New session storage for comprehensive tracking
 
 class InterviewAnswer(BaseModel):
     sessionId: str
@@ -97,14 +104,32 @@ class PlanPreviewResponse(BaseModel):
     is_ai_generated: bool
     generation_source: str
 
-# New Pydantic model for TTS request
+# New Pydantic model for TTS request (used by ElevenLabs VoiceService)
 class TTSRequest(BaseModel):
     text: str
-    voice: str = "Kore"
+    voice: str = "rachel"
 
-# New Pydantic model for STT response
-class STTResponse(BaseModel):
-    text: str
+# Pydantic model for ATS Review
+class ATSReviewResponse(BaseModel):
+    ats_score: int
+    strengths: List[str]
+    weaknesses: List[str]
+    recommendations: List[str]
+    keyword_match_percentage: int
+    overall_feedback: str
+
+# Pydantic model for Interview Summary
+class InterviewSummaryResponse(BaseModel):
+    session_id: str
+    total_questions: int
+    total_rounds: int
+    overall_score: float
+    time_taken_minutes: int
+    round_summaries: List[dict]
+    strengths: List[str]
+    areas_for_improvement: List[str]
+    recommendations: List[str]
+    overall_feedback: str
 
 class ResumeParserService:
     @staticmethod
@@ -463,39 +488,182 @@ class GeminiService:
                 type="mcq"
             )
     
+    # Removed Gemini TTS/STT helpers; ElevenLabs VoiceService is used instead.
+    
     @staticmethod
-    async def convert_text_to_speech(text: str, voice_name: str) -> bytes:
+    async def review_resume_ats(resume_text: str, job_description: str) -> ATSReviewResponse:
         """
-        Converts text to audio data using the Gemini TTS model.
+        Analyzes resume against job description and provides ATS score and feedback.
         """
         try:
-            tts_response = await tts_model.generate_content_async(
-                text,
+            prompt = f"""
+            You are an expert ATS (Applicant Tracking System) analyzer and recruiter. 
+            Analyze this resume against the job description and provide detailed feedback.
+
+            RESUME:
+            {resume_text[:3000]}  # Limit to avoid token limits
+
+            JOB DESCRIPTION:
+            {job_description[:2000]}
+
+            Provide analysis in JSON format:
+            {{
+                "ats_score": 85,  // Score out of 100
+                "strengths": ["strength1", "strength2"],
+                "weaknesses": ["weakness1", "weakness2"], 
+                "recommendations": ["recommendation1", "recommendation2"],
+                "keyword_match_percentage": 75,  // Percentage of job keywords found in resume
+                "overall_feedback": "detailed feedback text"
+            }}
+
+            Focus on:
+            - Keyword matching between resume and job description
+            - Skills alignment
+            - Experience relevance
+            - Format and structure for ATS parsing
+            - Missing critical requirements
+            """
+            
+            response = await model.generate_content_async(
+                prompt,
                 generation_config=genai.types.GenerationConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config={
-                        "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}
-                    }
+                    response_mime_type="application/json",
+                    temperature=0.3,
+                    max_output_tokens=800
                 )
             )
             
-            audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
-            return audio_data
-
+            raw = response.text.strip().replace('```json', '').replace('```', '').strip()
+            result = json.loads(raw)
+            
+            return ATSReviewResponse(
+                ats_score=result.get("ats_score", 60),
+                strengths=result.get("strengths", ["Resume uploaded successfully"]),
+                weaknesses=result.get("weaknesses", ["Could be more specific"]),
+                recommendations=result.get("recommendations", ["Tailor resume to job description"]),
+                keyword_match_percentage=result.get("keyword_match_percentage", 50),
+                overall_feedback=result.get("overall_feedback", "Resume needs improvement for better ATS compatibility.")
+            )
         except Exception as e:
-            print(f"TTS error: {e}")
-            return b""  # Return empty bytes on error
+            print(f"Error in ATS review: {e}")
+            # Fallback response
+            return ATSReviewResponse(
+                ats_score=65,
+                strengths=["Resume format is readable", "Contains relevant experience"],
+                weaknesses=["Could include more keywords from job description", "May need better formatting"],
+                recommendations=["Add more specific skills mentioned in job posting", "Use bullet points for better readability"],
+                keyword_match_percentage=45,
+                overall_feedback="Unable to perform detailed ATS analysis. Consider reviewing your resume against the job requirements and adding relevant keywords."
+            )
 
     @staticmethod
-    async def convert_speech_to_text(audio_file_data: bytes) -> str:
+    async def generate_interview_summary(session_data: dict, company_name: str, job_role: str) -> InterviewSummaryResponse:
         """
-        Transcribes an audio file to text using a mock STT service.
-        In a real application, you'd integrate a real STT API here.
+        Generates a comprehensive interview summary with overall feedback and recommendations.
         """
-        # For this mockup, we'll just return a dummy transcription.
-        # This part of the code would be replaced with a real STT API call.
-        return "This is a dummy transcription of your audio."
-    
+        try:
+            # Extract data from session
+            questions_and_answers = session_data.get("questions_and_answers", [])
+            total_questions = len(questions_and_answers)
+            
+            # Calculate overall score
+            scores = [qa.get("score", 0) for qa in questions_and_answers if qa.get("score")]
+            overall_score = sum(scores) / len(scores) if scores else 0
+            
+            # Group by rounds
+            rounds = {}
+            for qa in questions_and_answers:
+                round_title = qa.get("round_title", "General")
+                if round_title not in rounds:
+                    rounds[round_title] = []
+                rounds[round_title].append(qa)
+            
+            round_summaries = []
+            for round_title, round_qas in rounds.items():
+                round_scores = [qa.get("score", 0) for qa in round_qas if qa.get("score")]
+                round_avg = sum(round_scores) / len(round_scores) if round_scores else 0
+                round_summaries.append({
+                    "round_title": round_title,
+                    "questions_count": len(round_qas),
+                    "average_score": round_avg,
+                    "question_types": list(set(qa.get("type", "unknown") for qa in round_qas))
+                })
+            
+            # Prepare context for AI summary
+            context = f"""
+            Interview Summary for {job_role} at {company_name}:
+            - Total Questions: {total_questions}
+            - Overall Score: {overall_score:.1f}/10
+            - Rounds: {len(rounds)}
+            
+            Round Performance:
+            {chr(10).join([f"- {r['round_title']}: {r['average_score']:.1f}/10 ({r['questions_count']} questions)" for r in round_summaries])}
+            
+            Sample Q&As:
+            {chr(10).join([f"Q: {qa.get('question', '')[:100]}... A: {qa.get('answer', '')[:100]}... Score: {qa.get('score', 0)}/10" for qa in questions_and_answers[:3]])}
+            """
+            
+            prompt = f"""
+            Generate a comprehensive interview summary based on this performance data:
+            
+            {context}
+            
+            Provide analysis in JSON format:
+            {{
+                "strengths": ["strength1", "strength2", "strength3"],
+                "areas_for_improvement": ["area1", "area2", "area3"],
+                "recommendations": ["recommendation1", "recommendation2", "recommendation3"],
+                "overall_feedback": "detailed overall feedback paragraph"
+            }}
+            
+            Focus on:
+            - Technical competency demonstrated
+            - Communication skills
+            - Problem-solving approach
+            - Areas that need development
+            - Specific actionable recommendations
+            """
+            
+            response = await model.generate_content_async(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    response_mime_type="application/json",
+                    temperature=0.3,
+                    max_output_tokens=600
+                )
+            )
+            
+            raw = response.text.strip().replace('```json', '').replace('```', '').strip()
+            result = json.loads(raw)
+            
+            return InterviewSummaryResponse(
+                session_id=session_data.get("session_id", ""),
+                total_questions=total_questions,
+                total_rounds=len(rounds),
+                overall_score=overall_score,
+                time_taken_minutes=session_data.get("duration_minutes", 0),
+                round_summaries=round_summaries,
+                strengths=result.get("strengths", ["Completed the interview", "Showed engagement"]),
+                areas_for_improvement=result.get("areas_for_improvement", ["Practice more technical questions"]),
+                recommendations=result.get("recommendations", ["Continue practicing", "Review fundamentals"]),
+                overall_feedback=result.get("overall_feedback", "Good effort in completing the interview. Keep practicing to improve your skills.")
+            )
+        except Exception as e:
+            print(f"Error generating interview summary: {e}")
+            # Fallback summary
+            return InterviewSummaryResponse(
+                session_id=session_data.get("session_id", ""),
+                total_questions=len(session_data.get("questions_and_answers", [])),
+                total_rounds=len(set(qa.get("round_title", "General") for qa in session_data.get("questions_and_answers", []))),
+                overall_score=5.0,
+                time_taken_minutes=session_data.get("duration_minutes", 0),
+                round_summaries=[],
+                strengths=["Completed the interview", "Showed engagement"],
+                areas_for_improvement=["Practice more questions", "Improve technical skills"],
+                recommendations=["Continue practicing", "Review core concepts", "Work on communication"],
+                overall_feedback="Thank you for completing the interview. Keep practicing to improve your skills and confidence."
+            )
+
     @staticmethod
     async def get_feedback_and_score(question: str, userAnswer: str, company_name: str, job_role: str, extracted_resume_text: str | None = None) -> FeedbackResponse:
         """
@@ -610,6 +778,122 @@ async def parse_resume(file: UploadFile = File(...)):
     return {"filename": file.filename, "extracted_text": extracted_text}
 
 
+@app.get("/api/voices")
+async def list_voices():
+    """Return available ElevenLabs voices (name -> id)."""
+    try:
+        return voice_service.list_voices()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/current-session")
+async def get_current_session():
+    """Returns current session if exists, otherwise 404."""
+    # For now, return 404 since we don't have persistent session storage
+    # In a real app, you'd check session storage/database
+    raise HTTPException(status_code=404, detail="No active session")
+
+
+@app.get("/api/interview-summary/{session_id}", response_model=InterviewSummaryResponse)
+async def get_interview_summary(session_id: str):
+    """
+    Returns comprehensive interview summary with overall feedback and recommendations.
+    """
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session_data = sessions[session_id]
+    
+    # Get company and role info
+    company_name = session_data.get("company_name", "Unknown Company")
+    job_role = session_data.get("job_role", "Unknown Role")
+    
+    # Generate comprehensive summary
+    summary = await GeminiService.generate_interview_summary(session_data, company_name, job_role)
+    return summary
+
+
+@app.post("/api/tts")
+async def tts(req: TTSRequest):
+    """Convert text to speech using ElevenLabs and return audio/mpeg bytes."""
+    try:
+        audio_bytes = voice_service.text_to_speech(req.text, req.voice)
+        return Response(content=audio_bytes, media_type="audio/mpeg")
+    except HTTPException as he:
+        # Graceful fallback when ElevenLabs refuses free-tier/abuse or auth issues
+        detail = getattr(he, "detail", None)
+        detail_str = str(detail).lower()
+        if (
+            "detected_unusual_activity" in detail_str
+            or "unauthorized" in detail_str
+            or "401" in detail_str
+            or "403" in detail_str
+        ):
+            return {
+                "fallback": "client_tts",
+                "reason": "elevenlabs_unavailable",
+                "message": "Using client-side TTS due to ElevenLabs restriction",
+                "text": req.text,
+                "voice": req.voice,
+            }
+        # For other TTS failures, surface a structured fallback as well
+        return {
+            "fallback": "client_tts",
+            "reason": "tts_error",
+            "message": "Using client-side TTS due to server TTS error",
+            "text": req.text,
+            "voice": req.voice,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ats-review", response_model=ATSReviewResponse)
+async def ats_review(
+    resumeFile: UploadFile = File(...),
+    jobDescription: str = Form(...)
+):
+    """
+    Analyzes resume against job description and provides ATS score and feedback.
+    """
+    if not jobDescription.strip():
+        raise HTTPException(status_code=400, detail="Job description is required for ATS review.")
+    
+    # Save and extract resume text
+    file_extension = resumeFile.filename.split('.')[-1].lower() if resumeFile.filename else ""
+    file_path = f"/tmp/{resumeFile.filename}"
+    
+    try:
+        with open(file_path, "wb") as f:
+            f.write(await resumeFile.read())
+
+        if file_extension == 'pdf':
+            resume_text = ResumeParserService.extract_text_from_pdf(file_path)
+        elif file_extension == 'docx':
+            resume_text = ResumeParserService.extract_text_from_docx(file_path)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid file type. Please upload a PDF or DOCX file.")
+        
+        if not resume_text.strip():
+            raise HTTPException(status_code=400, detail="Could not extract text from resume. Please check the file.")
+        
+        # Get ATS analysis
+        ats_result = await GeminiService.review_resume_ats(resume_text, jobDescription)
+        return ats_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing resume: {str(e)}")
+    finally:
+        # Clean up temporary file
+        try:
+            os.remove(file_path)
+        except:
+            pass
+
+
 @app.post("/api/preview-plan", response_model=PlanPreviewResponse)
 async def preview_plan(
     resumeFile: UploadFile | None = File(None),
@@ -670,15 +954,17 @@ async def start_interview(
     )
     
     # Store interview plan and other details in the session
-    session_data[session_id] = {
-        "job_description": "",
-        "years_of_experience": effective_yoe,
-        "job_role": effective_role,
+    sessions[session_id] = {
         "company_name": effective_company,
-        "interview_plan": interview_plan,
-        "current_round_index": 0,
-        "current_question_index": 0,
-        "interview_history": []
+        "job_role": effective_role,
+        "years_of_experience": effective_yoe,
+        "extracted_resume_text": "",
+        "current_round": 0,
+        "current_question": 0,
+        "questions_and_answers": [],
+        "is_complete": False,
+        "start_time": datetime.now(),
+        "session_id": session_id
     }
     
     return InterviewStartResponse(
@@ -693,9 +979,16 @@ async def start_interview(
 
 @app.post("/api/submit-answer", response_model=InterviewSubmitResponse)
 async def submit_answer(answer_data: InterviewAnswer):
+    # Check both session storages for compatibility
     session = session_data.get(answer_data.sessionId)
-    if not session:
+    session_new = sessions.get(answer_data.sessionId)
+    
+    if not session and not session_new:
         raise HTTPException(status_code=404, detail="Session not found.")
+    
+    # Use the new sessions storage if available, otherwise fall back to old one
+    if session_new:
+        session = session_new
     
     interview_plan = session["interview_plan"]
     current_round_index = session["current_round_index"]
@@ -735,11 +1028,33 @@ async def submit_answer(answer_data: InterviewAnswer):
     )
 
     # Store the user's answer and feedback to the session history
-    session["interview_history"].append({
-        "question": question_to_feedback,
-        "user_answer": answer_data.userAnswer,
-        "feedback": feedback.dict()
-    })
+    if "interview_history" in session:
+        session["interview_history"].append({
+            "question": question_to_feedback,
+            "user_answer": answer_data.userAnswer,
+            "feedback": feedback.dict()
+        })
+    
+    # Also store in the new format for comprehensive summary
+    if answer_data.sessionId in sessions:
+        sessions[answer_data.sessionId]["questions_and_answers"].append({
+            "question": question_to_feedback,
+            "answer": answer_data.userAnswer,
+            "score": feedback.score,
+            "round_title": current_round["title"],
+            "type": current_round["type"],
+            "feedback_text": feedback.feedback_text,
+            "strengths": feedback.strengths,
+            "weaknesses": feedback.weaknesses
+        })
+        
+        # Update completion status and duration
+        if session.get("is_complete", False):
+            start_time = sessions[answer_data.sessionId].get("start_time")
+            if start_time:
+                duration = (datetime.now() - start_time).total_seconds() / 60
+                sessions[answer_data.sessionId]["duration_minutes"] = int(duration)
+            sessions[answer_data.sessionId]["is_complete"] = True
     
     if current_question_index + 1 < current_round["question_count"]:
         session["current_question_index"] += 1
@@ -767,6 +1082,14 @@ async def submit_answer(answer_data: InterviewAnswer):
                 feedback=feedback
             )
         else:
+            # Mark interview as complete in new sessions storage
+            if answer_data.sessionId in sessions:
+                start_time = sessions[answer_data.sessionId].get("start_time")
+                if start_time:
+                    duration = (datetime.now() - start_time).total_seconds() / 60
+                    sessions[answer_data.sessionId]["duration_minutes"] = int(duration)
+                sessions[answer_data.sessionId]["is_complete"] = True
+            
             return InterviewSubmitResponse(
                 questionData=QuestionResponse(question="Congratulations! You have completed the mock interview.", type="complete"),
                 roundTitle="Interview Complete",

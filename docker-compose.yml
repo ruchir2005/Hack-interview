@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./interview-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./interview-backend/.env
+    volumes:
+      - ./interview-backend:/app
+    restart: unless-stopped
+    tty: true
+
+  frontend:
+    build: 
+      context: ./ai-mock-web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./ai-mock-web:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    restart: unless-stopped
