@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CodeEditor from "../components/CodeEditor";
 import { API_BASE } from "../lib/api";
+import { useSpeak } from "@/hooks/useSpeak";
+import InterviewSummary from "@/components/InterviewSummary";
 
 export default function InterviewPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -18,7 +20,6 @@ export default function InterviewPage() {
   const [error, setError] = useState<string | null>(null);
   const [roundType, setRoundType] = useState<string | null>(null);
   const [language, setLanguage] = useState("python");
-  const [isVoiceEnabled, setIsVoiceEnabled] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   
   // Timer and feedback states
@@ -27,34 +28,8 @@ export default function InterviewPage() {
   const [feedback, setFeedback] = useState<any>(null);
   const [showFeedback, setShowFeedback] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  // Form state for dynamic prompt inputs
-  const [companyName, setCompanyName] = useState("");
-  const [yearsOfExperience, setYearsOfExperience] = useState<string>("");
-  const [jobRole, setJobRole] = useState("");
-  const roles = [
-    "Software Engineer",
-    "Frontend Engineer",
-    "Backend Engineer",
-    "Full Stack Engineer",
-    "Mobile Engineer",
-    "Data Scientist",
-    "Machine Learning Engineer",
-    "AI Engineer",
-    "Data Engineer",
-    "DevOps Engineer",
-    "Site Reliability Engineer (SRE)",
-    "Cloud Engineer",
-    "Security Engineer",
-    "QA/Test Engineer",
-    "Automation Engineer",
-    "Product Manager",
-    "Program Manager",
-    "UI/UX Designer",
-    "Solution Architect",
-    "Systems Engineer",
-    "Embedded Systems Engineer",
-  ];
   const router = useRouter();
+  const { speakIfEnabled } = useSpeak();
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -112,6 +87,16 @@ export default function InterviewPage() {
     setFeedback(data.feedback);
     setShowFeedback(!!data.feedback);
 
+    // Auto-speak question if voice is enabled
+    if (data.questionData.question) {
+      speakIfEnabled(data.questionData.question);
+    }
+
+    // Auto-speak feedback if voice is enabled
+    if (data.feedback?.feedback_text) {
+      speakIfEnabled(data.feedback.feedback_text);
+    }
+
     // Start timer based on question type
     if (data.questionData.type === "technical" || data.questionData.type === "dsa") {
       startTimer(45); // 45 minutes for coding questions
@@ -155,43 +140,30 @@ export default function InterviewPage() {
     }
   };
 
-  // Remove auto-start. Show a form to begin interview dynamically.
-
-  const startInterviewSession = async () => {
-    if (!companyName.trim() || !jobRole.trim() || !yearsOfExperience.trim()) {
-      setError("Please fill in company, role, and years of experience.");
-      return;
-    }
-    setError(null);
-    setIsLoading(true);
-    try {
-      const form = new FormData();
-      form.append("companyName", companyName.trim());
-      form.append("jobRole", jobRole.trim());
-      form.append("yearsOfExperience", String(parseInt(yearsOfExperience, 10)));
-      // Backend ignores jobDescription/resume; send empty JD for compatibility
-      form.append("jobDescription", "");
-
-      const response = await fetch(`${API_BASE}/api/start-interview`, {
-        method: 'POST',
-        body: form,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to start interview session.');
+  // Check for existing session on component mount
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        // Try to get current session from backend
+        const response = await fetch(`${API_BASE}/api/current-session`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.sessionId) {
+            setSessionId(data.sessionId);
+            updateQuestionState(data);
+            return;
+          }
+        }
+      } catch (e) {
+        // No active session, redirect to resume page
       }
-
-      const data = await response.json();
-      setSessionId(data.sessionId);
-      updateQuestionState(data);
-    } catch (err: any) {
-      console.error("Error starting interview:", err);
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+      
+      // If no active session, redirect to resume page
+      router.push('/resume');
+    };
+    
+    checkSession();
+  }, [router]);
 
   const handleRecording = () => {
     if (isRecording) {
@@ -279,24 +251,14 @@ export default function InterviewPage() {
     }
   };
   
-  const handleVoiceToggle = () => {
-    setIsVoiceEnabled(!isVoiceEnabled);
-  };
+  // Remove local voice toggle - using global voice context now
 
-  if (isComplete) {
+  if (isComplete && sessionId) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
-        <div className="w-full max-w-2xl p-8 bg-white rounded-lg shadow-md text-center">
-          <h1 className="text-3xl font-bold text-green-600 mb-4">Interview Complete! 🎉</h1>
-          <p className="text-gray-700">Congratulations, you have completed the mock interview.</p>
-          <button
-            onClick={() => router.push("/")}
-            className="mt-6 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-          >
-            Start a New Interview
-          </button>
-        </div>
-      </div>
+      <InterviewSummary 
+        sessionId={sessionId} 
+        onNewInterview={() => router.push("/resume")} 
+      />
     );
   }
 
@@ -320,67 +282,7 @@ export default function InterviewPage() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
       <div className="w-full max-w-3xl p-8 bg-white rounded-lg shadow-md">
-        {!sessionId ? (
-          <div className="space-y-6">
-            <h1 className="text-3xl font-bold text-center text-gray-800">Start a Mock Interview</h1>
-            <p className="text-center text-gray-600">Prompts will be built using the fields below. Resume is not used.</p>
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Company</label>
-                <input
-                  type="text"
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder="e.g., Google"
-                  className="mt-1 w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Years of Experience</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={yearsOfExperience}
-                  onChange={(e) => setYearsOfExperience(e.target.value)}
-                  placeholder="e.g., 3"
-                  className="mt-1 w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Select Role</label>
-                <div className="mt-1 border rounded-lg h-48 overflow-y-auto p-2 space-y-2">
-                  {roles.map((role) => (
-                    <button
-                      key={role}
-                      type="button"
-                      onClick={() => setJobRole(role)}
-                      className={`w-full text-left px-3 py-2 rounded-md border transition ${
-                        jobRole === role ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white hover:bg-gray-50 border-gray-200'
-                      }`}
-                    >
-                      {role}
-                    </button>
-                  ))}
-                </div>
-                {jobRole && (
-                  <p className="mt-2 text-sm text-gray-600">Selected: <span className="font-medium">{jobRole}</span></p>
-                )}
-              </div>
-            </div>
-            <button
-              onClick={startInterviewSession}
-              disabled={!companyName.trim() || !jobRole.trim() || !yearsOfExperience.trim() || isLoading}
-              className={`w-full py-3 rounded-lg text-white font-semibold transition-colors duration-300 ${
-                (!companyName.trim() || !jobRole.trim() || !yearsOfExperience.trim() || isLoading)
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              {isLoading ? 'Starting...' : 'Start Interview'}
-            </button>
-          </div>
-        ) : (
+        {sessionId ? (
           <>
             <h1 className="text-3xl font-bold text-center text-gray-800 mb-6">{roundTitle}</h1>
 
@@ -455,18 +357,10 @@ export default function InterviewPage() {
                 
                 <div className="flex space-x-4 items-center">
                   <button
-                    onClick={() => handlePlayQuestion(question)}
+                    onClick={() => speakIfEnabled(question)}
                     className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
                   >
-                    🔊 Play Question
-                  </button>
-                  <button
-                    onClick={handleVoiceToggle}
-                    className={`px-4 py-2 rounded-lg text-white transition-colors ${
-                      isVoiceEnabled ? 'bg-green-500 hover:bg-green-600' : 'bg-gray-500 hover:bg-gray-600'
-                    }`}
-                  >
-                    {isVoiceEnabled ? '🎤 Voice Mode On' : '🎤 Voice Mode Off'}
+                    🔊 Repeat Question
                   </button>
                   {showFeedback && (
                     <button
@@ -526,6 +420,11 @@ export default function InterviewPage() {
               </div>
             )}
           </>
+        ) : (
+          <div className="text-center">
+            <div className="animate-spin h-8 w-8 text-blue-500 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading interview session...</p>
+          </div>
         )}
       </div>
     </div>

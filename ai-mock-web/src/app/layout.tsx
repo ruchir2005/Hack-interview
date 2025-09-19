@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { VoiceProvider } from "@/contexts/VoiceContext";
+import VoiceToggle from "@/components/VoiceToggle";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,10 +26,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        {children}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <VoiceProvider>
+          <header className="w-full border-b bg-white/60 backdrop-blur sticky top-0 z-10">
+            <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+              <div className="font-semibold">AI Mock Interview</div>
+              <VoiceToggle />
+            </div>
+          </header>
+          <main className="min-h-screen">
+            {children}
+          </main>
+        </VoiceProvider>
       </body>
     </html>
   );

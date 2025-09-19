@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent, ChangeEvent } from "react";
+import { useState, FormEvent, ChangeEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { API_BASE } from "../lib/api";
 
@@ -26,7 +26,33 @@ export default function ResumeUploadPage() {
       }
     | null
   >(null);
+  const [atsReview, setAtsReview] = useState<{
+    ats_score: number;
+    strengths: string[];
+    weaknesses: string[];
+    recommendations: string[];
+    keyword_match_percentage: number;
+    overall_feedback: string;
+  } | null>(null);
+  const [isAtsLoading, setIsAtsLoading] = useState(false);
+  const [showAtsReview, setShowAtsReview] = useState(false);
   const router = useRouter();
+
+  // Load saved form data on component mount
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('interviewData');
+      if (saved) {
+        const data = JSON.parse(saved);
+        setJobRole(data.jobRole || '');
+        setCompanyName(data.companyName || '');
+        setYearsOfExperience(data.yearsOfExperience || '');
+        setJobDescription(data.jobDescription || '');
+      }
+    } catch (e) {
+      // Ignore parsing errors
+    }
+  }, []);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files.length > 0) {
@@ -78,6 +104,38 @@ export default function ResumeUploadPage() {
     }
   };
 
+  const handleATSReview = async () => {
+    setError(null);
+    if (!resumeFile || !jobDescription.trim()) {
+      setError("Please upload a resume and provide job description for ATS review.");
+      return;
+    }
+
+    setIsAtsLoading(true);
+    setAtsReview(null);
+    const formData = new FormData();
+    formData.append("resumeFile", resumeFile);
+    formData.append("jobDescription", jobDescription);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/ats-review`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to analyze resume.');
+      }
+      const data = await res.json();
+      setAtsReview(data);
+      setShowAtsReview(true);
+    } catch (e: any) {
+      setError(e.message || 'Failed to analyze resume.');
+    } finally {
+      setIsAtsLoading(false);
+    }
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setError(null);
@@ -109,6 +167,14 @@ export default function ResumeUploadPage() {
 
       const data = await response.json();
       console.log("Backend response:", data);
+      
+      // Store form data in sessionStorage to avoid re-filling
+      sessionStorage.setItem('interviewData', JSON.stringify({
+        jobRole,
+        companyName,
+        yearsOfExperience,
+        jobDescription
+      }));
       
       router.push("/Interview");
 
@@ -257,6 +323,24 @@ export default function ResumeUploadPage() {
 
           {error && <p className="text-red-500 text-sm text-center">{error}</p>}
 
+          {/* ATS Review Section */}
+          <div className="border-t pt-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">📊 Resume Analysis (Optional)</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Get an ATS (Applicant Tracking System) score and detailed feedback on how well your resume matches the job description.
+            </p>
+            <button
+              type="button"
+              onClick={handleATSReview}
+              className={`w-full py-3 rounded-lg text-white font-semibold transition-colors duration-300 ${
+                isAtsLoading ? "bg-gray-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"
+              }`}
+              disabled={isAtsLoading || !resumeFile || !jobDescription.trim()}
+            >
+              {isAtsLoading ? "Analyzing Resume..." : "🔍 Get ATS Score & Feedback"}
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               type="button"
@@ -275,10 +359,95 @@ export default function ResumeUploadPage() {
               }`}
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Starting..." : "Proceed to Interview"}
+              {isSubmitting ? "Starting..." : "🚀 Start Interview"}
             </button>
           </div>
         </form>
+
+        {/* ATS Review Results */}
+        {showAtsReview && atsReview && (
+          <div className="mt-8 p-6 bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-gray-800">📊 ATS Resume Analysis</h2>
+              <button 
+                onClick={() => setShowAtsReview(false)}
+                className="text-gray-500 hover:text-gray-700 text-xl"
+              >
+                ×
+              </button>
+            </div>
+            
+            {/* Score Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="p-4 bg-white rounded-lg border">
+                <h3 className="font-semibold text-gray-700 mb-2">ATS Score</h3>
+                <div className="flex items-center gap-3">
+                  <div className={`text-3xl font-bold ${
+                    atsReview.ats_score >= 80 ? 'text-green-600' : 
+                    atsReview.ats_score >= 60 ? 'text-yellow-600' : 'text-red-600'
+                  }`}>
+                    {atsReview.ats_score}
+                  </div>
+                  <div className="text-gray-500">/ 100</div>
+                </div>
+              </div>
+              <div className="p-4 bg-white rounded-lg border">
+                <h3 className="font-semibold text-gray-700 mb-2">Keyword Match</h3>
+                <div className="flex items-center gap-3">
+                  <div className={`text-3xl font-bold ${
+                    atsReview.keyword_match_percentage >= 70 ? 'text-green-600' : 
+                    atsReview.keyword_match_percentage >= 50 ? 'text-yellow-600' : 'text-red-600'
+                  }`}>
+                    {atsReview.keyword_match_percentage}%
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Feedback Sections */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="p-4 bg-white rounded-lg border">
+                <h3 className="font-semibold text-green-700 mb-2">✅ Strengths</h3>
+                <ul className="text-sm text-gray-700 space-y-1">
+                  {atsReview.strengths.map((strength, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-green-500 mt-1">•</span>
+                      <span>{strength}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="p-4 bg-white rounded-lg border">
+                <h3 className="font-semibold text-red-700 mb-2">⚠️ Areas to Improve</h3>
+                <ul className="text-sm text-gray-700 space-y-1">
+                  {atsReview.weaknesses.map((weakness, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-red-500 mt-1">•</span>
+                      <span>{weakness}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="p-4 bg-white rounded-lg border">
+                <h3 className="font-semibold text-blue-700 mb-2">💡 Recommendations</h3>
+                <ul className="text-sm text-gray-700 space-y-1">
+                  {atsReview.recommendations.map((rec, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <span className="text-blue-500 mt-1">•</span>
+                      <span>{rec}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            {/* Overall Feedback */}
+            <div className="p-4 bg-white rounded-lg border">
+              <h3 className="font-semibold text-gray-700 mb-2">📝 Overall Feedback</h3>
+              <p className="text-gray-700 text-sm leading-relaxed">{atsReview.overall_feedback}</p>
+            </div>
+          </div>
+        )}
 
         {planPreview && (
           <div className="mt-8 p-6 bg-gray-50 border rounded-lg">
