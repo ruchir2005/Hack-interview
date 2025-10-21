@@ -2,10 +2,18 @@
 
 import { useEffect, useRef } from 'react';
 
+interface ParticleData {
+  element: HTMLDivElement;
+  x: number;
+  y: number;
+  velocity: { x: number; y: number };
+  size: number;
+}
+
 const ParticleBackground = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const animationFrameRef = useRef<number>();
-  const particlesRef = useRef<HTMLDivElement[]>([]);
+  const animationFrameRef = useRef<number | undefined>(undefined);
+  const particlesRef = useRef<ParticleData[]>([]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -93,7 +101,7 @@ const ParticleBackground = () => {
     };
 
     // Create connections for a single particle
-    const createConnections = (particle: any) => {
+    const createConnections = (particle: ParticleData) => {
       const connections = Array.from(container.querySelectorAll('.connection-line'));
       connections.forEach(conn => conn.remove());
       

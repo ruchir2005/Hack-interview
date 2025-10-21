@@ -6,6 +6,13 @@ import CodeEditor from "../components/CodeEditor";
 import { API_BASE } from "../lib/api";
 import { useSpeak } from "@/hooks/useSpeak";
 import InterviewSummary from "@/components/InterviewSummary";
+import UserVideoFeed from "@/components/UserVideoFeed";
+import AvatarVideo from "@/components/AvatarVideo";
+import AvatarChatBox from "@/components/AvatarChatBox";
+import MicrophoneButton from "@/components/MicrophoneButton";
+import { db } from "@/lib/db";
+import { useTTS } from "@/hooks/useTTS";
+import { useSTT } from "@/hooks/useSTT";
 
 export default function InterviewPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -38,6 +45,42 @@ export default function InterviewPage() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+
+  // Avatar and chat states
+  const [avatarMessages, setAvatarMessages] = useState<{ text: string; timestamp: number }[]>([]);
+  const [isAvatarSpeaking, setIsAvatarSpeaking] = useState(false);
+
+  // Web Speech API hooks
+  const { speak: speakTTS, stop: stopTTS, isSpeaking: isTTSSpeaking } = useTTS();
+  const { 
+    transcript, 
+    isListening, 
+    isSupported: isSTTSupported, 
+    startListening, 
+    stopListening, 
+    resetTranscript,
+    error: sttError 
+  } = useSTT();
+
+  // Sync TTS speaking state with avatar
+  useEffect(() => {
+    setIsAvatarSpeaking(isTTSSpeaking);
+  }, [isTTSSpeaking]);
+
+  // Update answer field with STT transcript
+  useEffect(() => {
+    if (transcript && roundType !== 'dsa' && roundType !== 'technical') {
+      setUserAnswer(prev => prev + transcript);
+      resetTranscript();
+    }
+  }, [transcript, roundType, resetTranscript]);
+
+  // Stop TTS when STT starts listening (avoid feedback)
+  useEffect(() => {
+    if (isListening) {
+      stopTTS();
+    }
+  }, [isListening, stopTTS]);
 
   // Timer functions
   const startTimer = (minutes: number) => {
@@ -108,14 +151,26 @@ export default function InterviewPage() {
     setFeedback(data.feedback ?? null);
     setShowFeedback(!!data.feedback);
 
-    // Auto-speak question if voice is enabled
+    // Add question to avatar chat and speak with TTS
     if (data.questionData.question) {
-      speakIfEnabled(data.questionData.question);
+      setAvatarMessages(prev => [...prev, {
+        text: data.questionData.question,
+        timestamp: Date.now()
+      }]);
+      
+      // Use Web Speech API TTS
+      speakTTS(data.questionData.question);
     }
 
-    // Auto-speak feedback if voice is enabled
+    // Add feedback to avatar chat and speak
     if (data.feedback?.feedback_text) {
-      speakIfEnabled(data.feedback.feedback_text);
+      setAvatarMessages(prev => [...prev, {
+        text: data.feedback?.feedback_text || "",
+        timestamp: Date.now()
+      }]);
+      
+      // Use Web Speech API TTS for feedback
+      speakTTS(data.feedback.feedback_text);
     }
 
     // Start timer based on question type
@@ -149,11 +204,30 @@ export default function InterviewPage() {
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('interviewSession');
+      const resumeDataRaw = sessionStorage.getItem('interviewData');
+      
       if (raw) {
         const data = JSON.parse(raw);
         if (data?.sessionId) {
           setSessionId(data.sessionId);
           updateQuestionState(data);
+          
+          // Save to database
+          if (resumeDataRaw) {
+            const resumeData = JSON.parse(resumeDataRaw);
+            db.saveInterviewData({
+              sessionId: data.sessionId,
+              resumeData: {
+                jobRole: resumeData.jobRole || '',
+                companyName: resumeData.companyName || '',
+                yearsOfExperience: resumeData.yearsOfExperience || 0,
+                jobDescription: resumeData.jobDescription || ''
+              },
+              currentQuestion: data.questionData?.question,
+              currentRound: data.roundTitle,
+              timestamp: Date.now()
+            });
+          }
           return;
         }
       }
@@ -280,9 +354,9 @@ export default function InterviewPage() {
   }
 
   return (
-    <div className="relative min-h-screen p-4 flex flex-col items-center justify-center">
+    <div className="relative min-h-screen p-4">
       <div className="animated-grid" />
-      <div className="relative w-full max-w-3xl p-8 rounded-lg glass-effect neon-border">
+      <div className="relative w-full max-w-7xl mx-auto">
         {sessionId ? (
           <>
             <h1 className="page-title text-center mb-6">{roundTitle}</h1>
@@ -296,7 +370,16 @@ export default function InterviewPage() {
                 <p>Loading question...</p>
               </div>
             ) : (
-              <div className="space-y-6">
+              <div className="flex flex-col lg:flex-row gap-6">
+                {/* Left Section - 75% - Interview Interface */}
+                <div className="flex-1 lg:w-3/4 space-y-6 p-8 rounded-lg glass-effect neon-border">
+                
+                {/* User Video - Compact at top of left section */}
+                <div className="w-full max-w-xs">
+                  <h3 className="text-sm font-semibold text-white mb-2">Your Video</h3>
+                  <UserVideoFeed />
+                </div>
+
                 {/* Timer and Progress Bar */}
                 <div className="flex items-center justify-between p-4 rounded-lg border border-white/15 bg-white/5">
                   <div className="flex items-center space-x-4">
@@ -358,7 +441,7 @@ export default function InterviewPage() {
                 
                 <div className="flex space-x-4 items-center">
                   <button
-                    onClick={() => speakIfEnabled(question)}
+                    onClick={() => speakTTS(question)}
                     className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
                   >
                     🔊 Repeat Question
@@ -372,6 +455,13 @@ export default function InterviewPage() {
                     </button>
                   )}
                 </div>
+
+                {/* STT Error Display */}
+                {sttError && (
+                  <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                    <p className="text-sm text-red-300">{sttError}</p>
+                  </div>
+                )}
 
                 {/* Conditional rendering for the code editor, MCQ options, or textarea */}
                 {roundType === "dsa" || roundType === "technical" ? (
@@ -397,14 +487,37 @@ export default function InterviewPage() {
                     ))}
                   </div>
                 ) : (
-                  <textarea
-                    id="answer"
-                    rows={10}
-                    value={userAnswer}
-                    onChange={(e) => setUserAnswer(e.target.value)}
-                    className="w-full p-4 border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50 bg-white/5 border-white/20"
-                    placeholder="Type your answer here..."
-                  />
+                  <div className="space-y-3">
+                    {/* Answer Input with Microphone */}
+                    <div className="relative">
+                      <textarea
+                        id="answer"
+                        rows={10}
+                        value={userAnswer}
+                        onChange={(e) => setUserAnswer(e.target.value)}
+                        className="w-full p-4 pr-16 border rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-white/50 bg-white/5 border-white/20"
+                        placeholder="Type your answer or use the microphone to speak..."
+                        disabled={isListening}
+                      />
+                      {/* Microphone Button */}
+                      <div className="absolute bottom-4 right-4">
+                        <MicrophoneButton
+                          isListening={isListening}
+                          isSupported={isSTTSupported}
+                          onStart={startListening}
+                          onStop={stopListening}
+                          disabled={isLoading}
+                        />
+                      </div>
+                    </div>
+                    {/* Listening Indicator */}
+                    {isListening && (
+                      <div className="flex items-center space-x-2 p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
+                        <div className="w-2 h-2 bg-red-400 rounded-full animate-pulse" />
+                        <span className="text-sm text-red-300 font-medium">Listening... Speak now</span>
+                      </div>
+                    )}
+                  </div>
                 )}
                 
                 <button
@@ -418,6 +531,21 @@ export default function InterviewPage() {
                 >
                   Submit Answer
                 </button>
+                </div>
+
+                {/* Right Section - 25% - Avatar Video and Chat */}
+                <div className="lg:w-1/4 space-y-4">
+                  {/* Avatar Video */}
+                  <div className="p-4 rounded-lg glass-effect neon-border">
+                    <h3 className="text-sm font-semibold text-white mb-3">AI Interviewer</h3>
+                    <AvatarVideo isSpeaking={isAvatarSpeaking} />
+                  </div>
+
+                  {/* Avatar Chat Box */}
+                  <div className="p-4 rounded-lg glass-effect neon-border" style={{ height: '400px' }}>
+                    <AvatarChatBox messages={avatarMessages} />
+                  </div>
+                </div>
               </div>
             )}
           </>
