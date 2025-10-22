@@ -31,8 +31,33 @@ if not API_KEY:
 # Configure the Gemini client
 genai.configure(api_key=API_KEY)
 
+# Safety settings to prevent blocking (use proper enum values)
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
+SAFETY_SETTINGS = [
+    {
+        "category": HarmCategory.HARM_CATEGORY_HARASSMENT,
+        "threshold": HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+        "category": HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+        "threshold": HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+        "category": HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+        "threshold": HarmBlockThreshold.BLOCK_NONE,
+    },
+    {
+        "category": HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+        "threshold": HarmBlockThreshold.BLOCK_NONE,
+    },
+]
+
 # Initialize the Gemini model - using flash for lower quota usage
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel(
+    'gemini-2.5-flash',
+    safety_settings=SAFETY_SETTINGS
+)
 
 app = FastAPI()
 voice_service = VoiceService()
