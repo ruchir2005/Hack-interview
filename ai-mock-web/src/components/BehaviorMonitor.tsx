@@ -329,6 +329,30 @@ export default function BehaviorMonitor({
                 </span>
               </div>
             </div>
+
+            {/* Detailed Angles */}
+            <div className="mt-3 pt-3 border-t border-gray-700">
+              <div className="text-xs text-gray-400 mb-2 font-semibold">📐 Detailed Metrics</div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-gray-800/50 p-2 rounded">
+                  <span className="text-gray-400">Head Yaw:</span>
+                  <span className="ml-1 text-blue-300 font-mono">{feedback.head_pose?.yaw?.toFixed(1) || '0.0'}°</span>
+                </div>
+                <div className="bg-gray-800/50 p-2 rounded">
+                  <span className="text-gray-400">Head Pitch:</span>
+                  <span className="ml-1 text-blue-300 font-mono">{feedback.head_pose?.pitch?.toFixed(1) || '0.0'}°</span>
+                </div>
+                <div className="bg-gray-800/50 p-2 rounded col-span-2">
+                  <span className="text-gray-400">Slouch Angle:</span>
+                  <span className={`ml-1 font-mono ${
+                    feedback.posture.slouch_angle <= 20 ? "text-green-400" : "text-yellow-400"
+                  }`}>
+                    {feedback.posture.slouch_angle?.toFixed(1) || '0.0'}°
+                  </span>
+                  <span className="ml-2 text-gray-500 text-xs">(≤20° is good)</span>
+                </div>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
