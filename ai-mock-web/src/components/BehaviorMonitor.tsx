@@ -96,6 +96,11 @@ export default function BehaviorMonitor({
           return;
         }
         
+        // Mark as initialized once we can capture frames
+        if (isInitializing) {
+          setIsInitializing(false);
+        }
+        
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         
@@ -130,8 +135,15 @@ export default function BehaviorMonitor({
 
         const data: BehaviorFeedback = await response.json();
         console.log("Received feedback:", data);
-        setFeedback(data);
-        setError(null);
+        
+        // Validate response has required fields
+        if (data && typeof data.confidence_score === 'number') {
+          setFeedback(data);
+          setError(null);
+        } else {
+          console.error("Invalid feedback format:", data);
+          setError("Invalid response format");
+        }
         
         if (onFeedbackUpdate) {
           onFeedbackUpdate(data);
