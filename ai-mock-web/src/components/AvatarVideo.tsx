@@ -6,9 +6,10 @@ import { User } from "lucide-react";
 interface AvatarVideoProps {
   isSpeaking?: boolean;
   videoUrl?: string; // Optional video URL for avatar
+  onEnded?: () => void; // Callback when video ends
 }
 
-export default function AvatarVideo({ isSpeaking = false, videoUrl }: AvatarVideoProps) {
+export default function AvatarVideo({ isSpeaking = false, videoUrl, onEnded }: AvatarVideoProps) {
   const [pulseAnimation, setPulseAnimation] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -32,10 +33,11 @@ export default function AvatarVideo({ isSpeaking = false, videoUrl }: AvatarVide
         <video
           ref={videoRef}
           src={videoUrl}
-          loop
+          loop={false}
           muted
           playsInline
-          className="w-full h-full object-cover"
+          onEnded={onEnded}
+          className="w-full h-full object-cover rounded-2xl"
         />
       ) : (
         // Fallback to animated avatar

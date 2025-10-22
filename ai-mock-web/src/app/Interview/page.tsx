@@ -13,6 +13,9 @@ import MicrophoneButton from "@/components/MicrophoneButton";
 import { db } from "@/lib/db";
 import { useTTS } from "@/hooks/useTTS";
 import { useSTT } from "@/hooks/useSTT";
+import { generateAvatar } from "@/lib/avatar";
+import { motion, AnimatePresence } from "framer-motion";
+import { Volume2, Video, Lightbulb, X } from "lucide-react";
 
 export default function InterviewPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -49,6 +52,25 @@ export default function InterviewPage() {
   // Avatar and chat states
   const [avatarMessages, setAvatarMessages] = useState<{ text: string; timestamp: number }[]>([]);
   const [isAvatarSpeaking, setIsAvatarSpeaking] = useState(false);
+  
+  // Avatar mode states
+  const [interviewMode, setInterviewMode] = useState<'audio' | 'avatar'>('audio');
+  const [avatarVideoUrl, setAvatarVideoUrl] = useState<string | null>(null);
+  const [isGeneratingAvatar, setIsGeneratingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  
+  // Hint states
+  const [currentHint, setCurrentHint] = useState<string | null>(null);
+  const [isLoadingHint, setIsLoadingHint] = useState(false);
+  const [showHint, setShowHint] = useState(false);
+
+  // When switching to avatar mode, generate avatar for current question
+  useEffect(() => {
+    if (interviewMode === 'avatar' && question && !avatarVideoUrl && !isGeneratingAvatar) {
+      console.log('🎭 Switching to Avatar Mode - generating video for current question');
+      handleAvatarGeneration(question);
+    }
+  }, [interviewMode]); // Only trigger when mode changes
 
   // Web Speech API hooks
   const { speak: speakTTS, stop: stopTTS, isSpeaking: isTTSSpeaking } = useTTS();
@@ -81,6 +103,89 @@ export default function InterviewPage() {
       stopTTS();
     }
   }, [isListening, stopTTS]);
+
+  // Handle avatar generation
+  const handleAvatarGeneration = useCallback(async (text: string) => {
+    console.log('🎬 handleAvatarGeneration called:', { interviewMode, hasText: !!text });
+    
+    if (interviewMode !== 'avatar' || !text) {
+      console.log('⏭️  Skipping avatar generation:', { interviewMode, hasText: !!text });
+      return;
+    }
+    
+    console.log('🎭 Starting avatar generation for text:', text.substring(0, 50) + '...');
+    setIsGeneratingAvatar(true);
+    setAvatarError(null);
+    setAvatarVideoUrl(null);
+    
+    try {
+      const result = await generateAvatar({ text });
+      const fullUrl = `${API_BASE}${result.video_url}`;
+      console.log('✅ Avatar video generated:', fullUrl);
+      setAvatarVideoUrl(fullUrl);
+      setIsAvatarSpeaking(true);
+    } catch (error) {
+      console.error('❌ Avatar generation failed:', error);
+      setAvatarError('Avatar generation failed. Falling back to audio.');
+      // Fallback to TTS
+      speakTTS(text);
+    } finally {
+      setIsGeneratingAvatar(false);
+    }
+  }, [interviewMode, speakTTS]);
+
+  // Handle avatar video end
+  const handleAvatarVideoEnd = useCallback(() => {
+    setIsAvatarSpeaking(false);
+    setAvatarVideoUrl(null);
+  }, []);
+
+  // Handle hint request
+  const handleGetHint = async () => {
+    if (!sessionId) return;
+    
+    setIsLoadingHint(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/get-hint`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionId,
+          currentAnswer: userAnswer
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+        console.error('Hint API error:', response.status, errorData);
+        throw new Error(`Failed to get hint: ${errorData.detail || response.statusText}`);
+      }
+
+      const data = await response.json();
+      setCurrentHint(data.hint);
+      setShowHint(true);
+      
+      // Speak the hint if in audio mode
+      if (interviewMode === 'audio') {
+        speakTTS(data.hint);
+      }
+      
+      // Add hint to avatar chat
+      setAvatarMessages(prev => [...prev, {
+        text: `💡 Hint: ${data.hint}`,
+        timestamp: Date.now()
+      }]);
+      
+    } catch (error) {
+      console.error('Error getting hint:', error);
+      setCurrentHint("Try thinking about a specific situation from your experience. What was the context? What actions did you take?");
+      setShowHint(true);
+    } finally {
+      setIsLoadingHint(false);
+    }
+  };
 
   // Timer functions
   const startTimer = (minutes: number) => {
@@ -151,15 +256,19 @@ export default function InterviewPage() {
     setFeedback(data.feedback ?? null);
     setShowFeedback(!!data.feedback);
 
-    // Add question to avatar chat and speak with TTS
+    // Add question to avatar chat and speak with TTS or Avatar
     if (data.questionData.question) {
       setAvatarMessages(prev => [...prev, {
         text: data.questionData.question,
         timestamp: Date.now()
       }]);
       
-      // Use Web Speech API TTS
-      speakTTS(data.questionData.question);
+      // Use Avatar Mode or TTS based on setting
+      if (interviewMode === 'avatar') {
+        handleAvatarGeneration(data.questionData.question);
+      } else {
+        speakTTS(data.questionData.question);
+      }
     }
 
     // Add feedback to avatar chat and speak
@@ -169,8 +278,12 @@ export default function InterviewPage() {
         timestamp: Date.now()
       }]);
       
-      // Use Web Speech API TTS for feedback
-      speakTTS(data.feedback.feedback_text);
+      // Use Avatar Mode or TTS based on setting
+      if (interviewMode === 'avatar') {
+        handleAvatarGeneration(data.feedback.feedback_text);
+      } else {
+        speakTTS(data.feedback.feedback_text);
+      }
     }
 
     // Start timer based on question type
@@ -380,6 +493,35 @@ export default function InterviewPage() {
                   <UserVideoFeed />
                 </div>
 
+                {/* Interview Mode Toggle */}
+                <div className="flex items-center justify-center space-x-4 p-4 rounded-lg border border-white/15 bg-white/5">
+                  <span className="text-sm text-white/80 font-medium">Interview Mode:</span>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => setInterviewMode('audio')}
+                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                        interviewMode === 'audio'
+                          ? 'bg-blue-500 text-white shadow-lg'
+                          : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      <Volume2 className="w-4 h-4" />
+                      <span className="text-sm font-medium">🎙️ Audio Mode</span>
+                    </button>
+                    <button
+                      onClick={() => setInterviewMode('avatar')}
+                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+                        interviewMode === 'avatar'
+                          ? 'bg-purple-500 text-white shadow-lg'
+                          : 'bg-white/10 text-white/60 hover:bg-white/20'
+                      }`}
+                    >
+                      <Video className="w-4 h-4" />
+                      <span className="text-sm font-medium">🎭 Avatar Mode</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Timer and Progress Bar */}
                 <div className="flex items-center justify-between p-4 rounded-lg border border-white/15 bg-white/5">
                   <div className="flex items-center space-x-4">
@@ -520,17 +662,62 @@ export default function InterviewPage() {
                   </div>
                 )}
                 
-                <button
-                  onClick={handleSubmitAnswer}
-                  disabled={(!userAnswer.trim() && !selectedMcqOption) || isLoading}
-                  className={`w-full py-3 rounded-lg text-white font-semibold transition-colors duration-300 ${
-                    (userAnswer.trim() || selectedMcqOption) && !isLoading
-                      ? "bg-blue-600 hover:bg-blue-700"
-                      : "bg-gray-400 cursor-not-allowed"
-                  }`}
-                >
-                  Submit Answer
-                </button>
+                {/* Hint Section */}
+                {showHint && currentHint && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg relative"
+                  >
+                    <button
+                      onClick={() => setShowHint(false)}
+                      className="absolute top-2 right-2 text-yellow-300 hover:text-yellow-100"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                    <div className="flex items-start space-x-3">
+                      <Lightbulb className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <h4 className="text-sm font-semibold text-yellow-300 mb-1">Hint</h4>
+                        <p className="text-sm text-yellow-100/90">{currentHint}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+                
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleGetHint}
+                    disabled={isLoadingHint || isComplete}
+                    className="flex-1 py-3 rounded-lg bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold transition-colors duration-300 flex items-center justify-center space-x-2"
+                  >
+                    {isLoadingHint ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        <span>Getting Hint...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lightbulb className="w-4 h-4" />
+                        <span>Need a Hint?</span>
+                      </>
+                    )}
+                  </button>
+                  
+                  <button
+                    onClick={handleSubmitAnswer}
+                    disabled={(!userAnswer.trim() && !selectedMcqOption) || isLoading}
+                    className={`flex-1 py-3 rounded-lg text-white font-semibold transition-colors duration-300 ${
+                      (userAnswer.trim() || selectedMcqOption) && !isLoading
+                        ? "bg-blue-600 hover:bg-blue-700"
+                        : "bg-gray-400 cursor-not-allowed"
+                    }`}
+                  >
+                    Submit Answer
+                  </button>
+                </div>
                 </div>
 
                 {/* Right Section - 25% - Avatar Video and Chat */}
@@ -538,7 +725,47 @@ export default function InterviewPage() {
                   {/* Avatar Video */}
                   <div className="p-4 rounded-lg glass-effect neon-border">
                     <h3 className="text-sm font-semibold text-white mb-3">AI Interviewer</h3>
-                    <AvatarVideo isSpeaking={isAvatarSpeaking} />
+                    
+                    {/* Avatar Generation Loader */}
+                    <AnimatePresence mode="wait">
+                      {isGeneratingAvatar && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="flex flex-col items-center justify-center h-full min-h-[200px] space-y-3"
+                        >
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+                          <p className="text-sm text-white/80">Interviewer is speaking...</p>
+                        </motion.div>
+                      )}
+                      
+                      {!isGeneratingAvatar && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          transition={{ duration: 0.3 }}
+                        >
+                          <AvatarVideo 
+                            isSpeaking={isAvatarSpeaking} 
+                            videoUrl={avatarVideoUrl || undefined}
+                            onEnded={handleAvatarVideoEnd}
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Avatar Error Display */}
+                    {avatarError && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg"
+                      >
+                        <p className="text-xs text-yellow-300">{avatarError}</p>
+                      </motion.div>
+                    )}
                   </div>
 
                   {/* Avatar Chat Box */}

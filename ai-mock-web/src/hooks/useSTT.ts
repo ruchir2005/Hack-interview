@@ -61,8 +61,14 @@ export function useSTT(): UseSTTReturn {
         };
 
         recognition.onerror = (event: any) => {
-          console.error('Speech recognition error:', event.error);
-          setError(`Speech recognition error: ${event.error}`);
+          // Network errors are common and usually harmless - just means STT unavailable
+          if (event.error === 'network') {
+            console.warn('Speech recognition unavailable (network error). You can still type your answers.');
+            setError('Speech recognition unavailable. Please type your answer.');
+          } else {
+            console.error('Speech recognition error:', event.error);
+            setError(`Speech recognition error: ${event.error}`);
+          }
           setIsListening(false);
           
           // Auto-restart on some errors

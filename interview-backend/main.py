@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import google.generativeai as genai
 from PyPDF2 import PdfReader
@@ -17,6 +18,7 @@ from PyPDF2 import PdfReader
 # Import the Gemini SDK
 import google.generativeai as genai
 from voice_service import VoiceService
+from avatar_service import AvatarService
 
 # Load environment variables
 load_dotenv()
@@ -29,10 +31,11 @@ if not API_KEY:
 genai.configure(api_key=API_KEY)
 
 # Initialize the Gemini model - using flash for lower quota usage
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 app = FastAPI()
 voice_service = VoiceService()
+avatar_service = AvatarService()
 
 # Loosen CORS for local development including IDE/browser preview proxies
 app.add_middleware(
@@ -45,6 +48,14 @@ app.add_middleware(
 
 session_data: Dict[str, Any] = {}
 sessions: Dict[str, Any] = {}  # New session storage for comprehensive tracking
+
+# Ensure static directories exist and mount static files for serving generated avatar videos
+BASE_DIR = os.path.dirname(__file__)
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+STATIC_OUTPUT_DIR = os.path.join(STATIC_DIR, "output")
+os.makedirs(STATIC_OUTPUT_DIR, exist_ok=True)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 class InterviewAnswer(BaseModel):
     sessionId: str
@@ -86,6 +97,23 @@ class InterviewSubmitResponse(BaseModel):
     roundTitle: str
     isComplete: bool
     feedback: FeedbackResponse | None = Field(default=None)
+
+class HintRequest(BaseModel):
+    sessionId: str
+    currentAnswer: str = Field(default="", description="User's current partial answer")
+
+class HintResponse(BaseModel):
+    hint: str
+    hint_type: str = Field(default="guidance", description="Type: guidance, example, or clarification")
+
+# Pydantic models for avatar generation
+class GenerateAvatarRequest(BaseModel):
+    text: str
+    voice: str = Field(default="en_male")
+    emotion: str = Field(default="neutral")
+
+class GenerateAvatarResponse(BaseModel):
+    video_url: str
 
 # Models for plan preview
 class PlanItem(BaseModel):
@@ -147,6 +175,27 @@ class ResumeParserService:
         text = [paragraph.text for paragraph in doc.paragraphs]
         return "\n".join(text)
 
+# =============================
+# Avatar video generation route
+# =============================
+@app.post("/generate_avatar", response_model=GenerateAvatarResponse)
+async def generate_avatar(req: GenerateAvatarRequest):
+    try:
+        out_path = avatar_service.generate_video(req.text, voice=req.voice, emotion=req.emotion)
+        if not out_path:
+            raise HTTPException(status_code=500, detail="Avatar generation failed.")
+
+        # Ensure the output is under STATIC_OUTPUT_DIR
+        # Build a URL path relative to /static
+        rel_path = os.path.relpath(out_path, STATIC_DIR)
+        video_url = f"/static/{rel_path.replace(os.sep, '/')}"
+        return GenerateAvatarResponse(video_url=video_url)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"/generate_avatar error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error generating avatar")
+
 class GeminiService:
     @staticmethod
     async def extract_candidate_profile(resume_text: str | None, job_description: str | None) -> Dict[str, Any]:
@@ -189,24 +238,38 @@ class GeminiService:
             """
             
             # Try with simpler prompt first to avoid quota issues
-            simple_prompt = f"""
-            Create interview plan JSON for {job_role} at {company_name} ({years_of_experience} YOE).
-            Senior: 6-8 rounds, Mid: 5-6 rounds, Junior: 3-5 rounds.
-            JSON format: [{{"title":"Round Name", "type":"behavioral|technical|dsa|mcq", "question_count":2, "estimated_minutes":45}}]
-            Vary by company. Token: {nonce}
-            """
+            simple_prompt = f"""Create an interview plan for {job_role} at {company_name} with {years_of_experience} years experience.
+
+Guidelines:
+- Senior (6+ YOE): 6-8 rounds
+- Mid-level (3-5 YOE): 5-6 rounds  
+- Junior (0-2 YOE): 3-5 rounds
+
+Return ONLY a JSON array in this format:
+[
+  {{"title": "Round Name", "type": "behavioral", "question_count": 2, "estimated_minutes": 30}},
+  {{"title": "Coding Round", "type": "dsa", "question_count": 2, "estimated_minutes": 45}}
+]
+
+Types: behavioral, technical, dsa, mcq
+Vary rounds based on company culture. Token: {nonce}"""
             
-            response = await model.generate_content_async(
+            response = model.generate_content(
                 simple_prompt,
                 generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
                     temperature=0.7,
-                    max_output_tokens=1000
+                    max_output_tokens=2000
                 )
             )
             raw = (response.text or "").strip()
-            cleaned = raw.replace('```json', '').replace('```', '').strip()
-            plan = json.loads(cleaned)
+            # Extract JSON array from response
+            start = raw.find('[')
+            end = raw.rfind(']') + 1
+            if start >= 0 and end > start:
+                json_str = raw[start:end]
+                plan = json.loads(json_str)
+            else:
+                raise ValueError("No JSON array found in response")
             
             # Validate and normalize the plan
             for r in plan:
@@ -344,7 +407,7 @@ class GeminiService:
             Return only the question text.
             """
             
-            response = await model.generate_content_async(
+            response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     temperature=0.95,  # Higher temperature for more variety
@@ -407,16 +470,22 @@ class GeminiService:
             Make it unique and specific. Token: {nonce}
             """
             
-            response = await model.generate_content_async(
+            response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
                     temperature=0.9,  # Higher for more variety
                     max_output_tokens=300
                 )
             )
-            raw = response.text.strip().replace('```json', '').replace('```', '').strip()
-            result = json.loads(raw)
+            raw = response.text.strip()
+            # Extract JSON from response
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start >= 0 and end > start:
+                json_str = raw[start:end]
+                result = json.loads(json_str)
+            else:
+                raise ValueError("No JSON found in response")
             return CodingQuestionResponse(question=result["question"], initial_code=result["initial_code"], type="technical")
         except Exception as e:
             print(f"Error generating coding question: {e}")
@@ -465,14 +534,21 @@ class GeminiService:
               "correct_answer": "B: A function that remembers the values from its enclosing scope even if the scope is no longer active."
             }}
             """
-            response = await model.generate_content_async(
+            response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
                     temperature=0.7
                 )
             )
-            result = json.loads(response.text)
+            raw = response.text.strip()
+            # Extract JSON from response
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start >= 0 and end > start:
+                json_str = raw[start:end]
+                result = json.loads(json_str)
+            else:
+                raise ValueError("No JSON found in response")
             return MCQQuestionResponse(
                 question=result["question"],
                 options=result["options"],
@@ -496,45 +572,51 @@ class GeminiService:
         Analyzes resume against job description and provides ATS score and feedback.
         """
         try:
-            prompt = f"""
-            You are an expert ATS (Applicant Tracking System) analyzer and recruiter. 
-            Analyze this resume against the job description and provide detailed feedback.
+            prompt = f"""Analyze this resume for ATS compatibility and job fit.
 
-            RESUME:
-            {resume_text[:3000]}  # Limit to avoid token limits
+RESUME:
+{resume_text[:3000]}
 
-            JOB DESCRIPTION:
-            {job_description[:2000]}
+JOB DESCRIPTION:
+{job_description[:2000]}
 
-            Provide analysis in JSON format:
-            {{
-                "ats_score": 85,  // Score out of 100
-                "strengths": ["strength1", "strength2"],
-                "weaknesses": ["weakness1", "weakness2"], 
-                "recommendations": ["recommendation1", "recommendation2"],
-                "keyword_match_percentage": 75,  // Percentage of job keywords found in resume
-                "overall_feedback": "detailed feedback text"
-            }}
+Provide detailed analysis in this JSON format:
+{{
+  "ats_score": 85,
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "weaknesses": ["weakness 1", "weakness 2"],
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"],
+  "keyword_match_percentage": 75,
+  "overall_feedback": "2-3 sentences of constructive feedback"
+}}
 
-            Focus on:
-            - Keyword matching between resume and job description
-            - Skills alignment
-            - Experience relevance
-            - Format and structure for ATS parsing
-            - Missing critical requirements
-            """
+Focus on:
+- Keyword matching
+- Skills alignment  
+- Experience relevance
+- ATS-friendly formatting
+- Missing requirements"""
             
-            response = await model.generate_content_async(
+            response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
                     temperature=0.3,
-                    max_output_tokens=800
+                    max_output_tokens=1000
                 )
             )
             
-            raw = response.text.strip().replace('```json', '').replace('```', '').strip()
-            result = json.loads(raw)
+            if not response.text:
+                raise ValueError("Empty response from model")
+            
+            # Extract JSON from response
+            raw = response.text.strip()
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start >= 0 and end > start:
+                json_str = raw[start:end]
+                result = json.loads(json_str)
+            else:
+                raise ValueError("No JSON found in response")
             
             return ATSReviewResponse(
                 ats_score=result.get("ats_score", 60),
@@ -624,17 +706,23 @@ class GeminiService:
             - Specific actionable recommendations
             """
             
-            response = await model.generate_content_async(
+            response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
                     temperature=0.3,
                     max_output_tokens=600
                 )
             )
             
-            raw = response.text.strip().replace('```json', '').replace('```', '').strip()
-            result = json.loads(raw)
+            raw = response.text.strip()
+            # Extract JSON from response
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start >= 0 and end > start:
+                json_str = raw[start:end]
+                result = json.loads(json_str)
+            else:
+                raise ValueError("No JSON found in response")
             
             return InterviewSummaryResponse(
                 session_id=session_data.get("session_id", ""),
@@ -670,35 +758,49 @@ class GeminiService:
         Generates feedback and a score for the user's answer, considering the resume.
         """
         try:
-            prompt = f"""
-            Evaluate this interview answer for {job_role} at {company_name}:
+            prompt = f"""Evaluate this interview answer for a {job_role} position.
+
+Question: {question}
+
+Candidate's Answer: {userAnswer}
+
+Provide your evaluation in this exact JSON format:
+{{
+  "score": 7,
+  "strengths": ["strength point 1", "strength point 2"],
+  "weaknesses": ["area for improvement 1"],
+  "feedback_text": "Overall constructive feedback in 2-3 sentences"
+}}
+
+Rate from 1-10. Be constructive and specific."""
             
-            Question: "{question}"
-            Answer: "{userAnswer}"
-            
-            Rate 1-10 and provide feedback in JSON:
-            {{"score": 8, "strengths": ["strength1", "strength2"], "weaknesses": ["improvement1"], "feedback_text": "overall feedback"}}
-            
-            Consider: STAR method, specificity, results, leadership, company fit.
-            """
-            
-            response = await model.generate_content_async(
+            response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
-                    temperature=0.4,
-                    max_output_tokens=400
+                    temperature=0.5,
+                    max_output_tokens=600
                 )
             )
             
-            raw = response.text.strip().replace('```json', '').replace('```', '').strip()
-            result = json.loads(raw)
-            return FeedbackResponse(
-                score=result.get("score", 6),
-                strengths=result.get("strengths", ["Good attempt"]),
-                weaknesses=result.get("weaknesses", ["Could be more specific"]),
-                feedback_text=f"🤖 AI Generated: {result.get('feedback_text', 'Keep practicing!')}"
-            )
+            if not response.text:
+                raise ValueError("Empty response from model")
+            
+            # Extract JSON from response
+            raw = response.text.strip()
+            # Find JSON object in the response
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start >= 0 and end > start:
+                json_str = raw[start:end]
+                result = json.loads(json_str)
+                return FeedbackResponse(
+                    score=result.get("score", 6),
+                    strengths=result.get("strengths", ["Good attempt"]),
+                    weaknesses=result.get("weaknesses", ["Could be more specific"]),
+                    feedback_text=f"🤖 AI Feedback: {result.get('feedback_text', 'Keep practicing!')}"
+                )
+            else:
+                raise ValueError("No JSON found in response")
         except Exception as e:
             print(f"Error generating feedback: {e}")
             # Better fallback feedback based on answer length and content
@@ -961,7 +1063,8 @@ async def start_interview(
         "extracted_resume_text": "",
         # Keep both legacy and new keys for compatibility
         "current_round": 0,
-        "current_question": 0,
+        "current_question": initial_question_data.question,  # Store actual question text
+        "current_question_type": initial_round["type"],  # Store question type
         "interview_plan": interview_plan,
         "current_round_index": 0,
         "current_question_index": 0,
@@ -1066,6 +1169,10 @@ async def submit_answer(answer_data: InterviewAnswer):
         
         next_question_data = await get_next_question_data(session, current_round)
         
+        # Update session with new question
+        session["current_question"] = next_question_data.question
+        session["current_question_type"] = current_round["type"]
+        
         return InterviewSubmitResponse(
             questionData=next_question_data,
             roundTitle=current_round["title"],
@@ -1079,6 +1186,10 @@ async def submit_answer(answer_data: InterviewAnswer):
             
             next_round = interview_plan[session["current_round_index"]]
             next_question_data = await get_next_question_data(session, next_round)
+            
+            # Update session with new question
+            session["current_question"] = next_question_data.question
+            session["current_question_type"] = next_round["type"]
             
             return InterviewSubmitResponse(
                 questionData=next_question_data,
@@ -1101,6 +1212,74 @@ async def submit_answer(answer_data: InterviewAnswer):
                 isComplete=True,
                 feedback=feedback
             )
+
+
+# New endpoint for getting hints when stuck
+@app.post("/api/get-hint", response_model=HintResponse)
+async def get_hint(hint_request: HintRequest):
+    """
+    Provide a helpful hint to the user when they're stuck on a question.
+    Like a real interviewer would do.
+    """
+    try:
+        session_id = hint_request.sessionId
+        
+        if session_id not in sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session = sessions[session_id]
+        current_question = session.get("current_question", "")
+        question_type = session.get("current_question_type", "behavioral")
+        job_role = session.get("job_role", "")
+        current_answer = hint_request.currentAnswer
+        
+        # Track hint count
+        if "hints_used" not in session:
+            session["hints_used"] = 0
+        session["hints_used"] += 1
+        
+        # Generate contextual hint based on question type
+        hint_prompt = f"""You are a helpful interviewer. The candidate is stuck on this question:
+
+Question: {current_question}
+Question Type: {question_type}
+Job Role: {job_role}
+Current Answer (if any): {current_answer if current_answer else "Not started yet"}
+
+Provide a helpful hint that:
+1. Doesn't give away the complete answer
+2. Guides them in the right direction
+3. Is encouraging and supportive
+4. Is specific to their situation
+
+For behavioral questions: Suggest a framework (STAR method) or prompt them to think about specific experiences
+For technical questions: Give a small clue about the approach or concept, not the solution
+For coding questions: Hint at the algorithm or data structure, not the code
+
+Keep the hint to 2-3 sentences maximum. Be warm and encouraging like a real interviewer.
+"""
+        
+        response = model.generate_content(hint_prompt)
+        hint_text = response.text.strip()
+        
+        # Determine hint type
+        hint_type = "guidance"
+        if "example" in hint_text.lower() or "for instance" in hint_text.lower():
+            hint_type = "example"
+        elif "clarif" in hint_text.lower() or "mean" in hint_text.lower():
+            hint_type = "clarification"
+        
+        return HintResponse(hint=hint_text, hint_type=hint_type)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error generating hint: {e}")
+        # Provide a generic helpful hint as fallback
+        return HintResponse(
+            hint="Take a moment to think about your past experiences. What situation comes to mind? Try using the STAR method: Situation, Task, Action, Result.",
+            hint_type="guidance"
+        )
 
 
 # New endpoint for Text-to-Speech
