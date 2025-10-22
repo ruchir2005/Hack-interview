@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+*.env
+
+# Node
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Linly-Talker (not needed for deployment)
+interview-backend/Linly-Talker/
+interview-backend/static/
+interview-backend/temp_frame.png
+interview-backend/*.sh
+interview-backend/setup_avatar.py
+interview-backend/download_*.py
+interview-backend/download_*.sh
+
+# Documentation (optional - keep if you want)
+*.md
+!README.md
+
+# Test files
+test_*.sh
+start_all.sh
+
+# Logs
+*.log
+nohup.out
+backend.log
