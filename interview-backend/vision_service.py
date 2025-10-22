@@ -18,9 +18,9 @@ class VisionService:
         
         self.holistic = self.mp_holistic.Holistic(
             static_image_mode=False,
-            model_complexity=0,
-            min_detection_confidence=0.3,
-            min_tracking_confidence=0.3,
+            model_complexity=1,  # Increased from 0 to 1 for better accuracy
+            min_detection_confidence=0.2,  # Lowered from 0.3 to 0.2
+            min_tracking_confidence=0.2,   # Lowered from 0.3 to 0.2
         )
         
         self.last_face_time = time.time()
@@ -129,6 +129,8 @@ class VisionService:
         feedback_messages = []
         
         now = time.time()
+        
+        print(f"[VisionService] Frame: {image_w}x{image_h}, Face detected: {results.face_landmarks is not None}, Pose detected: {results.pose_landmarks is not None}")
         
         # Draw face mesh if detected
         if results.face_landmarks:
