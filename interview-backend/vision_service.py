@@ -208,7 +208,7 @@ class VisionService:
         
         # Title
         cv2.putText(frame, "Interview Behavior Analysis", (10, 30),
-                   cv2.FONT_HERSHEY_BOLD, 0.8, (255, 255, 255), 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         
         # Confidence bar
         self.draw_text_with_background(frame, "Confidence:", (10, 55), 
@@ -236,7 +236,7 @@ class VisionService:
         
         # Metrics text
         cv2.putText(frame, "METRICS", (panel_x, panel_y), 
-                   cv2.FONT_HERSHEY_BOLD, 0.6, (255, 255, 0), 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         
         cv2.putText(frame, f"Head Yaw: {head_pose['yaw']:.1f}°", (panel_x, panel_y + 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
@@ -252,7 +252,7 @@ class VisionService:
         cv2.rectangle(frame, (0, feedback_y - 10), (image_w, image_h), (0, 0, 0), -1)
         
         cv2.putText(frame, overall, (10, feedback_y + 10),
-                   cv2.FONT_HERSHEY_BOLD, 0.6, (255, 255, 0), 2)
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         
         for i, msg in enumerate(feedback_messages[:3]):
             cv2.putText(frame, msg, (10, feedback_y + 40 + i * 25),

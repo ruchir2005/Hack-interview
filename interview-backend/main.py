@@ -1329,9 +1329,11 @@ async def analyze_behavior(request: VisionAnalysisRequest):
     Returns real-time feedback on presence, eye contact, posture, confidence
     """
     try:
+        print(f"[analyze-behavior] Received request, image length: {len(request.image) if request.image else 0}")
         result = vision_service.process_base64_frame(request.image)
         
         if "error" in result:
+            print(f"[analyze-behavior] Error from vision service: {result['error']}")
             raise HTTPException(status_code=400, detail=result["error"])
         
         # Optionally store behavior metrics in session
