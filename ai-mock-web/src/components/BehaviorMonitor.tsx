@@ -208,9 +208,11 @@ export default function BehaviorMonitor({
     intervalRef.current = setInterval(analyzeFrame, 2000);
 
     return () => {
+      console.log("[BehaviorMonitor] Cleanup - clearing interval and timer");
       clearTimeout(startTimer);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null; // IMPORTANT: Reset to null
       }
     };
   }, [isActive, sessionId, onFeedbackUpdate]); // Removed isAnalyzing from deps to prevent interval recreation
