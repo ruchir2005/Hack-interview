@@ -175,7 +175,7 @@ export default function BehaviorMonitor({
         clearInterval(intervalRef.current);
       }
     };
-  }, [isActive, sessionId, isAnalyzing, onFeedbackUpdate]);
+  }, [isActive, sessionId, onFeedbackUpdate]); // Removed isAnalyzing from deps to prevent interval recreation
 
   if (!isActive) {
     return (
