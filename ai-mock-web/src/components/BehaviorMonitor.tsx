@@ -34,6 +34,8 @@ export default function BehaviorMonitor({
   isActive = true,
   onFeedbackUpdate 
 }: BehaviorMonitorProps) {
+  console.log("[BehaviorMonitor] Component mounted/updated", { sessionId, isActive });
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [feedback, setFeedback] = useState<BehaviorFeedback | null>(null);
