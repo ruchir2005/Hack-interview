@@ -89,14 +89,27 @@ export default function BehaviorMonitor({
         const canvas = canvasRef.current;
         const video = videoRef.current;
         
+        // Check if video is ready
+        if (!video.videoWidth || !video.videoHeight) {
+          console.log("Video not ready yet");
+          setIsAnalyzing(false);
+          return;
+        }
+        
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         
         const ctx = canvas.getContext("2d");
-        if (!ctx) return;
+        if (!ctx) {
+          console.error("Could not get canvas context");
+          setIsAnalyzing(false);
+          return;
+        }
         
         ctx.drawImage(video, 0, 0);
         const imageData = canvas.toDataURL("image/jpeg", 0.8);
+        
+        console.log("Sending frame for analysis, size:", imageData.length);
 
         const response = await fetch(`${API_BASE}/api/analyze-behavior`, {
           method: "POST",
@@ -110,10 +123,13 @@ export default function BehaviorMonitor({
         });
 
         if (!response.ok) {
-          throw new Error("Analysis failed");
+          const errorText = await response.text();
+          console.error("API error:", response.status, errorText);
+          throw new Error(`Analysis failed: ${response.status}`);
         }
 
         const data: BehaviorFeedback = await response.json();
+        console.log("Received feedback:", data);
         setFeedback(data);
         setError(null);
         
@@ -122,7 +138,7 @@ export default function BehaviorMonitor({
         }
       } catch (err) {
         console.error("Error analyzing frame:", err);
-        setError("Analysis error");
+        setError(`Analysis error: ${err instanceof Error ? err.message : 'Unknown error'}`);
       } finally {
         setIsAnalyzing(false);
       }
