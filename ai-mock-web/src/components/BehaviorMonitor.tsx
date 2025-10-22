@@ -39,6 +39,7 @@ export default function BehaviorMonitor({
   const [feedback, setFeedback] = useState<BehaviorFeedback | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Start webcam
@@ -53,10 +54,14 @@ export default function BehaviorMonitor({
         
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => {
+            setIsInitializing(false);
+          };
         }
       } catch (err) {
         console.error("Error accessing webcam:", err);
-        setError("Unable to access webcam");
+        setError("Unable to access webcam. Please grant camera permission.");
+        setIsInitializing(false);
       }
     };
 
@@ -149,9 +154,22 @@ export default function BehaviorMonitor({
         <canvas ref={canvasRef} />
       </div>
 
+      {/* Initializing State */}
+      {isInitializing && !error && (
+        <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+          <div className="flex items-center gap-3">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
+            <div>
+              <p className="text-sm text-blue-300 font-medium">Initializing camera...</p>
+              <p className="text-xs text-blue-200/70">Please grant camera permission</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Feedback Display */}
       <AnimatePresence mode="wait">
-        {feedback && (
+        {!isInitializing && feedback && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -253,6 +271,16 @@ export default function BehaviorMonitor({
         )}
       </AnimatePresence>
 
+      {/* Waiting for first analysis */}
+      {!isInitializing && !feedback && !error && (
+        <div className="p-3 bg-gray-500/10 border border-gray-500/20 rounded-lg">
+          <div className="flex items-center gap-2">
+            <div className="animate-pulse h-2 w-2 bg-blue-400 rounded-full"></div>
+            <p className="text-sm text-gray-300">Waiting for analysis...</p>
+          </div>
+        </div>
+      )}
+
       {/* Error display */}
       {error && (
         <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
@@ -261,7 +289,7 @@ export default function BehaviorMonitor({
       )}
 
       {/* Analyzing indicator */}
-      {isAnalyzing && (
+      {isAnalyzing && feedback && (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-400"></div>
           <span>Analyzing behavior...</span>
