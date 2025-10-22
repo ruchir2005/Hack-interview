@@ -19,6 +19,7 @@ from PyPDF2 import PdfReader
 import google.generativeai as genai
 from voice_service import VoiceService
 from avatar_service import AvatarService
+from vision_service import VisionService
 
 # Load environment variables
 load_dotenv()
@@ -36,6 +37,7 @@ model = genai.GenerativeModel('gemini-2.5-flash')
 app = FastAPI()
 voice_service = VoiceService()
 avatar_service = AvatarService()
+vision_service = VisionService()
 
 # Loosen CORS for local development including IDE/browser preview proxies
 app.add_middleware(
@@ -1301,3 +1303,83 @@ async def speech_to_text(audio_file: UploadFile = File(...)):
         return STTResponse(text=transcribed_text)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"STT error: {e}")
+
+
+# Pydantic model for vision analysis
+class VisionAnalysisRequest(BaseModel):
+    image: str = Field(..., description="Base64 encoded image from webcam")
+    sessionId: Optional[str] = Field(None, description="Session ID to track behavior over time")
+
+class VisionAnalysisResponse(BaseModel):
+    presence: bool
+    eye_contact: str
+    confidence_score: int
+    posture: Dict[str, Any]
+    head_pose: Dict[str, float]
+    feedback: List[str]
+    overall: str
+    timestamp: float
+
+
+# New endpoint for Computer Vision Behavior Analysis
+@app.post("/api/analyze-behavior", response_model=VisionAnalysisResponse)
+async def analyze_behavior(request: VisionAnalysisRequest):
+    """
+    Analyze user behavior from webcam frame using CV
+    Returns real-time feedback on presence, eye contact, posture, confidence
+    """
+    try:
+        result = vision_service.process_base64_frame(request.image)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        # Optionally store behavior metrics in session
+        if request.sessionId and request.sessionId in sessions:
+            if "behavior_metrics" not in sessions[request.sessionId]:
+                sessions[request.sessionId]["behavior_metrics"] = []
+            
+            sessions[request.sessionId]["behavior_metrics"].append({
+                "timestamp": result["timestamp"],
+                "confidence_score": result["confidence_score"],
+                "eye_contact": result["eye_contact"],
+                "posture_good": result["posture"]["is_good"]
+            })
+        
+        return VisionAnalysisResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in behavior analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Vision analysis error: {str(e)}")
+
+
+# Endpoint to get behavior summary for a session
+@app.get("/api/behavior-summary/{session_id}")
+async def get_behavior_summary(session_id: str):
+    """Get aggregated behavior metrics for an interview session"""
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    metrics = sessions[session_id].get("behavior_metrics", [])
+    
+    if not metrics:
+        return {
+            "session_id": session_id,
+            "total_samples": 0,
+            "message": "No behavior data collected"
+        }
+    
+    # Calculate aggregates
+    avg_confidence = sum(m["confidence_score"] for m in metrics) / len(metrics)
+    good_eye_contact_pct = (sum(1 for m in metrics if m["eye_contact"] == "good") / len(metrics)) * 100
+    good_posture_pct = (sum(1 for m in metrics if m["posture_good"]) / len(metrics)) * 100
+    
+    return {
+        "session_id": session_id,
+        "total_samples": len(metrics),
+        "average_confidence": round(avg_confidence, 1),
+        "eye_contact_percentage": round(good_eye_contact_pct, 1),
+        "good_posture_percentage": round(good_posture_pct, 1),
+        "overall_rating": "Excellent" if avg_confidence >= 70 else "Good" if avg_confidence >= 50 else "Needs Improvement"
+    }

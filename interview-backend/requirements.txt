@@ -8,6 +8,9 @@ python-multipart>=0.0.9
 elevenlabs>=1.0.0
 aiofiles>=23.2.1
 
+# Computer Vision for behavior monitoring
+mediapipe>=0.10.0
+
 # Linly-Talker dependencies (for avatar video generation)
 edge-tts>=6.1.9
 torch>=2.0.0

@@ -10,6 +10,7 @@ import UserVideoFeed from "@/components/UserVideoFeed";
 import AvatarVideo from "@/components/AvatarVideo";
 import AvatarChatBox from "@/components/AvatarChatBox";
 import MicrophoneButton from "@/components/MicrophoneButton";
+import BehaviorMonitor from "@/components/BehaviorMonitor";
 import { db } from "@/lib/db";
 import { useTTS } from "@/hooks/useTTS";
 import { useSTT } from "@/hooks/useSTT";
@@ -771,6 +772,17 @@ export default function InterviewPage() {
                   {/* Avatar Chat Box */}
                   <div className="p-4 rounded-lg glass-effect neon-border" style={{ height: '400px' }}>
                     <AvatarChatBox messages={avatarMessages} />
+                  </div>
+
+                  {/* Behavior Monitor - CV Analysis */}
+                  <div className="rounded-lg glass-effect neon-border overflow-hidden">
+                    <BehaviorMonitor 
+                      sessionId={sessionId || undefined}
+                      isActive={!isComplete}
+                      onFeedbackUpdate={(feedback) => {
+                        console.log('Behavior feedback:', feedback);
+                      }}
+                    />
                   </div>
                 </div>
               </div>
