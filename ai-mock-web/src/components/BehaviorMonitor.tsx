@@ -163,10 +163,11 @@ export default function BehaviorMonitor({
         
         // Validate response has required fields
         if (data && typeof data.confidence_score === 'number') {
+          console.log("✅ Setting feedback state with valid data");
           setFeedback(data);
           setError(null);
         } else {
-          console.error("Invalid feedback format:", data);
+          console.error("❌ Invalid feedback format:", data);
           setError("Invalid response format");
         }
         
@@ -222,7 +223,7 @@ export default function BehaviorMonitor({
 
       {/* Feedback Display */}
       <AnimatePresence mode="wait">
-        {!isInitializing && feedback && (
+        {feedback && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -325,11 +326,11 @@ export default function BehaviorMonitor({
       </AnimatePresence>
 
       {/* Waiting for first analysis */}
-      {!isInitializing && !feedback && !error && (
+      {!feedback && !error && !isInitializing && (
         <div className="p-3 bg-gray-500/10 border border-gray-500/20 rounded-lg">
           <div className="flex items-center gap-2">
             <div className="animate-pulse h-2 w-2 bg-blue-400 rounded-full"></div>
-            <p className="text-sm text-gray-300">Waiting for analysis...</p>
+            <p className="text-sm text-gray-300">Starting analysis...</p>
           </div>
         </div>
       )}
