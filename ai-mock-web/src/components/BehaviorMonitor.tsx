@@ -202,10 +202,10 @@ export default function BehaviorMonitor({
     const startTimer = setTimeout(() => {
       console.log("[BehaviorMonitor] Starting first analysis after delay");
       analyzeFrame();
-    }, 1000); // Wait 1 second for video to load
+    }, 500); // Wait 0.5 seconds for video to load
     
-    // Then analyze every 2 seconds
-    intervalRef.current = setInterval(analyzeFrame, 2000);
+    // Then analyze every 1 second for more dynamic updates
+    intervalRef.current = setInterval(analyzeFrame, 1000);
 
     return () => {
       console.log("[BehaviorMonitor] Cleanup - clearing interval and timer");
