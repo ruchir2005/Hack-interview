@@ -18,15 +18,15 @@ class VisionService:
         self.mp_holistic = mp.solutions.holistic
         self.mp_drawing = mp.solutions.drawing_utils
         
-        # Initialize MediaPipe Holistic
+        # Initialize MediaPipe Holistic with lower thresholds for better detection
         self.holistic = self.mp_holistic.Holistic(
             static_image_mode=False,
-            model_complexity=1,
+            model_complexity=0,  # Faster, less resource intensive
             smooth_landmarks=True,
             enable_segmentation=False,
             refine_face_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
+            min_detection_confidence=0.3,  # Lower threshold for better detection
+            min_tracking_confidence=0.3,   # Lower threshold for better tracking
         )
         
         # Thresholds
@@ -111,8 +111,10 @@ class VisionService:
         Returns: dict with presence, eye_contact, posture, confidence, feedback
         """
         image_h, image_w = frame.shape[:2]
+        print(f"[VisionService] Analyzing frame: {image_w}x{image_h}")
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.holistic.process(rgb)
+        print(f"[VisionService] Face detected: {results.face_landmarks is not None}")
         
         now = time.time()
         presence = False
@@ -127,6 +129,7 @@ class VisionService:
         if results.face_landmarks:
             presence = True
             self.last_face_time = now
+            print(f"[VisionService] ✓ Face landmarks found: {len(results.face_landmarks.landmark)} points")
             
             # Head direction
             hd = self.head_direction_estimate(results.face_landmarks, image_w, image_h)
@@ -209,10 +212,17 @@ class VisionService:
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
             if frame is None:
+                print("[VisionService] ERROR: Failed to decode image")
                 return {"error": "Failed to decode image"}
+            
+            print(f"[VisionService] Successfully decoded frame: {frame.shape}")
+            
+            # Optional: Save frame for debugging (comment out in production)
+            # cv2.imwrite("/tmp/debug_frame.jpg", frame)
             
             return self.analyze_frame(frame)
         except Exception as e:
+            print(f"[VisionService] ERROR: {str(e)}")
             return {"error": str(e)}
     
     def cleanup(self):
