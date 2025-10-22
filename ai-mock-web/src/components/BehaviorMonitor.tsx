@@ -89,7 +89,12 @@ export default function BehaviorMonitor({
 
   // Capture and analyze frames
   useEffect(() => {
-    if (!isActive || !videoRef.current || !canvasRef.current) return;
+    if (!isActive || !videoRef.current || !canvasRef.current) {
+      console.log("[BehaviorMonitor] Not starting interval:", { isActive, hasVideo: !!videoRef.current, hasCanvas: !!canvasRef.current });
+      return;
+    }
+
+    console.log("[BehaviorMonitor] Starting analysis interval");
 
     const analyzeFrame = async () => {
       if (isAnalyzing || !videoRef.current || !canvasRef.current) return;
