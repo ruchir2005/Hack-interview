@@ -94,10 +94,19 @@ export default function BehaviorMonitor({
       return;
     }
 
+    // Prevent multiple intervals
+    if (intervalRef.current) {
+      console.log("[BehaviorMonitor] Interval already running, skipping");
+      return;
+    }
+
     console.log("[BehaviorMonitor] Starting analysis interval");
 
     const analyzeFrame = async () => {
-      if (isAnalyzing || !videoRef.current || !canvasRef.current) return;
+      if (isAnalyzing || !videoRef.current || !canvasRef.current) {
+        console.log("[BehaviorMonitor] Skipping frame - already analyzing or refs missing");
+        return;
+      }
 
       setIsAnalyzing(true);
       
