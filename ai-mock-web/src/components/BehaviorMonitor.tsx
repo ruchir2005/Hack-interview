@@ -91,8 +91,21 @@ export default function BehaviorMonitor({
 
   // Capture and analyze frames
   useEffect(() => {
-    if (!isActive || !videoRef.current || !canvasRef.current) {
-      console.log("[BehaviorMonitor] Not starting interval:", { isActive, hasVideo: !!videoRef.current, hasCanvas: !!canvasRef.current });
+    console.log("[BehaviorMonitor] useEffect triggered", { 
+      isActive, 
+      hasVideo: !!videoRef.current, 
+      hasCanvas: !!canvasRef.current,
+      hasInterval: !!intervalRef.current 
+    });
+    
+    if (!isActive) {
+      console.log("[BehaviorMonitor] Not active, skipping");
+      return;
+    }
+
+    // Wait for refs to be ready
+    if (!videoRef.current || !canvasRef.current) {
+      console.log("[BehaviorMonitor] Refs not ready yet, will retry");
       return;
     }
 
@@ -102,7 +115,7 @@ export default function BehaviorMonitor({
       return;
     }
 
-    console.log("[BehaviorMonitor] Starting analysis interval");
+    console.log("[BehaviorMonitor] ✓ Starting analysis interval NOW!");
 
     const analyzeFrame = async () => {
       console.log("[BehaviorMonitor] analyzeFrame called, isAnalyzingRef.current:", isAnalyzingRef.current);
