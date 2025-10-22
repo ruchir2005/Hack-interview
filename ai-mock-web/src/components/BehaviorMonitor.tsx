@@ -42,6 +42,17 @@ export default function BehaviorMonitor({
   const [isInitializing, setIsInitializing] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Force initialization to complete after 3 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (isInitializing) {
+        console.log("Force completing initialization");
+        setIsInitializing(false);
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [isInitializing]);
+
   // Start webcam
   useEffect(() => {
     let stream: MediaStream | null = null;
