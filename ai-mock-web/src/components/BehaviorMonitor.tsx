@@ -37,10 +37,10 @@ export default function BehaviorMonitor({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [feedback, setFeedback] = useState<BehaviorFeedback | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isAnalyzingRef = useRef(false); // Use ref instead of state to avoid closure issues
 
   // Force initialization to complete after 3 seconds
   useEffect(() => {
@@ -103,12 +103,12 @@ export default function BehaviorMonitor({
     console.log("[BehaviorMonitor] Starting analysis interval");
 
     const analyzeFrame = async () => {
-      if (isAnalyzing || !videoRef.current || !canvasRef.current) {
+      if (isAnalyzingRef.current || !videoRef.current || !canvasRef.current) {
         console.log("[BehaviorMonitor] Skipping frame - already analyzing or refs missing");
         return;
       }
 
-      setIsAnalyzing(true);
+      isAnalyzingRef.current = true;
       
       try {
         const canvas = canvasRef.current;
@@ -117,7 +117,7 @@ export default function BehaviorMonitor({
         // Check if video is ready
         if (!video.videoWidth || !video.videoHeight) {
           console.log("Video not ready yet");
-          setIsAnalyzing(false);
+          isAnalyzingRef.current = false;
           return;
         }
         
@@ -132,7 +132,7 @@ export default function BehaviorMonitor({
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           console.error("Could not get canvas context");
-          setIsAnalyzing(false);
+          isAnalyzingRef.current = false;
           return;
         }
         
@@ -177,7 +177,7 @@ export default function BehaviorMonitor({
         console.error("Error analyzing frame:", err);
         setError(`Analysis error: ${err instanceof Error ? err.message : 'Unknown error'}`);
       } finally {
-        setIsAnalyzing(false);
+        isAnalyzingRef.current = false;
       }
     };
 
@@ -342,7 +342,7 @@ export default function BehaviorMonitor({
       )}
 
       {/* Analyzing indicator */}
-      {isAnalyzing && feedback && (
+      {isAnalyzingRef.current && feedback && (
         <div className="flex items-center gap-2 text-xs text-gray-400">
           <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-400"></div>
           <span>Analyzing behavior...</span>
