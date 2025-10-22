@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Eye, User, AlertCircle, CheckCircle } from "lucide-react";
+import { Eye, AlertCircle, CheckCircle } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -133,7 +133,13 @@ export default function BehaviorMonitor({
     };
   }, [isActive, sessionId, isAnalyzing, onFeedbackUpdate]);
 
-  if (!isActive) return null;
+  if (!isActive) {
+    return (
+      <div className="p-3 bg-gray-500/10 border border-gray-500/20 rounded-lg">
+        <p className="text-sm text-gray-400">Behavior monitoring inactive</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

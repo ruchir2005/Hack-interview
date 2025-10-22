@@ -775,7 +775,8 @@ export default function InterviewPage() {
                   </div>
 
                   {/* Behavior Monitor - CV Analysis */}
-                  <div className="rounded-lg glass-effect neon-border overflow-hidden">
+                  <div className="p-4 rounded-lg glass-effect neon-border">
+                    <h3 className="text-sm font-semibold text-white mb-3">📹 Behavior Analysis</h3>
                     <BehaviorMonitor 
                       sessionId={sessionId || undefined}
                       isActive={!isComplete}
