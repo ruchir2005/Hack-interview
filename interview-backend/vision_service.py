@@ -1,230 +1,298 @@
 """
-Vision Service for Real-time Interview Behavior Monitoring
-Provides WebSocket streaming of CV analysis to frontend
+Enhanced Vision Service - Real-time CV Analysis with Dynamic Visualization
+Displays metrics, feedback, and visual indicators directly on video feed
 """
 
 import cv2
 import numpy as np
 import mediapipe as mp
-from collections import deque
 import time
-import asyncio
-from typing import Dict, Optional
 import base64
+from typing import Dict, Tuple
 
 class VisionService:
     def __init__(self):
-        self.mp_face_mesh = mp.solutions.face_mesh
         self.mp_holistic = mp.solutions.holistic
         self.mp_drawing = mp.solutions.drawing_utils
+        self.mp_drawing_styles = mp.solutions.drawing_styles
         
-        # Initialize MediaPipe Holistic with lower thresholds for better detection
         self.holistic = self.mp_holistic.Holistic(
             static_image_mode=False,
-            model_complexity=0,  # Faster, less resource intensive
-            smooth_landmarks=True,
-            enable_segmentation=False,
-            refine_face_landmarks=True,
-            min_detection_confidence=0.3,  # Lower threshold for better detection
-            min_tracking_confidence=0.3,   # Lower threshold for better tracking
+            model_complexity=0,
+            min_detection_confidence=0.3,
+            min_tracking_confidence=0.3,
         )
         
-        # Thresholds
-        self.AWAY_SECONDS_THRESHOLD = 2.0
-        self.MISSING_SECONDS_THRESHOLD = 3.0
-        self.SLOUCH_ANGLE_THRESHOLD = 20.0
-        
-        # History for smoothing
-        self.yaw_hist = deque(maxlen=10)
-        self.pitch_hist = deque(maxlen=10)
-        self.slouch_hist = deque(maxlen=10)
-        self.presence_hist = deque(maxlen=10)
-        
-        # Timing
         self.last_face_time = time.time()
-        self.last_eye_contact_time = time.time()
+        self.metrics_history = []
         
-    def head_direction_estimate(self, face_landmarks, image_w, image_h) -> Optional[Dict]:
-        """Estimate head pose (yaw, pitch, roll)"""
-        try:
-            pts = face_landmarks.landmark
-            nose = np.array([pts[1].x * image_w, pts[1].y * image_h])
-            left_eye = np.array([pts[33].x * image_w, pts[33].y * image_h])
-            right_eye = np.array([pts[263].x * image_w, pts[263].y * image_h])
-            chin = np.array([pts[199].x * image_w, pts[199].y * image_h])
-        except Exception:
-            return None
-
-        eye_center = (left_eye + right_eye) / 2.0
-        face_center = (eye_center + chin) / 2.0
-        v = nose - face_center
-
-        face_width = np.linalg.norm(right_eye - left_eye) + 1e-8
-        yaw = (v[0] / face_width) * 50.0
-
-        face_height = np.linalg.norm(chin - eye_center) + 1e-8
-        pitch = (v[1] / face_height) * 50.0
-
-        eyes_vec = right_eye - left_eye
-        roll = np.degrees(np.arctan2(eyes_vec[1], eyes_vec[0]))
-
-        return {"yaw": float(yaw), "pitch": float(pitch), "roll": float(roll)}
+    def draw_text_with_background(self, img, text, pos, font_scale=0.6, 
+                                   thickness=2, text_color=(255, 255, 255), 
+                                   bg_color=(0, 0, 0), padding=5):
+        """Draw text with background rectangle"""
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        (text_width, text_height), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+        
+        x, y = pos
+        cv2.rectangle(img, 
+                     (x - padding, y - text_height - padding),
+                     (x + text_width + padding, y + baseline + padding),
+                     bg_color, -1)
+        cv2.putText(img, text, (x, y), font, font_scale, text_color, thickness)
+        
+    def draw_confidence_bar(self, img, confidence, x, y, width=200, height=20):
+        """Draw confidence score as progress bar"""
+        # Background
+        cv2.rectangle(img, (x, y), (x + width, y + height), (50, 50, 50), -1)
+        
+        # Fill based on confidence
+        fill_width = int((confidence / 100) * width)
+        if confidence >= 70:
+            color = (0, 255, 0)  # Green
+        elif confidence >= 40:
+            color = (0, 255, 255)  # Yellow
+        else:
+            color = (0, 0, 255)  # Red
+            
+        cv2.rectangle(img, (x, y), (x + fill_width, y + height), color, -1)
+        
+        # Border
+        cv2.rectangle(img, (x, y), (x + width, y + height), (255, 255, 255), 2)
+        
+        # Text
+        text = f"{confidence}%"
+        cv2.putText(img, text, (x + width + 10, y + 15), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
     
-    def posture_slouch_estimate(self, pose_landmarks, image_w, image_h) -> Optional[float]:
-        """Estimate forward slouch angle"""
-        try:
-            left_shoulder = np.array([
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.LEFT_SHOULDER].x * image_w,
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.LEFT_SHOULDER].y * image_h
-            ])
-            right_shoulder = np.array([
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.RIGHT_SHOULDER].x * image_w,
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.RIGHT_SHOULDER].y * image_h
-            ])
-            left_hip = np.array([
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.LEFT_HIP].x * image_w,
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.LEFT_HIP].y * image_h
-            ])
-            right_hip = np.array([
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.RIGHT_HIP].x * image_w,
-                pose_landmarks.landmark[self.mp_holistic.PoseLandmark.RIGHT_HIP].y * image_h
-            ])
-        except Exception:
-            return None
-
-        shoulder_mid = (left_shoulder + right_shoulder) / 2.0
-        hip_mid = (left_hip + right_hip) / 2.0
-        torso_vec = hip_mid - shoulder_mid
+    def draw_status_indicator(self, img, status, label, x, y):
+        """Draw colored status circle with label"""
+        colors = {
+            'good': (0, 255, 0),
+            'moderate': (0, 255, 255),
+            'poor': (0, 0, 255),
+            'unknown': (128, 128, 128)
+        }
+        color = colors.get(status, (128, 128, 128))
         
-        vertical = np.array([0.0, 1.0])
-        torso_dir = np.array([torso_vec[0], torso_vec[1]])
+        # Circle
+        cv2.circle(img, (x, y), 8, color, -1)
+        cv2.circle(img, (x, y), 8, (255, 255, 255), 2)
         
-        cosang = np.dot(torso_dir, vertical) / (np.linalg.norm(torso_dir) * np.linalg.norm(vertical) + 1e-8)
-        cosang = np.clip(cosang, -1.0, 1.0)
-        tilt_deg = np.degrees(np.arccos(cosang))
-        
-        return float(tilt_deg)
+        # Label
+        cv2.putText(img, label, (x + 15, y + 5), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     
-    def analyze_frame(self, frame: np.ndarray) -> Dict:
-        """
-        Analyze a single frame and return behavior metrics
-        Returns: dict with presence, eye_contact, posture, confidence, feedback
-        """
+    def head_direction_estimate(self, face_landmarks, image_w, image_h):
+        """Calculate head pose angles"""
+        nose = face_landmarks.landmark[1]
+        chin = face_landmarks.landmark[152]
+        left_eye = face_landmarks.landmark[33]
+        right_eye = face_landmarks.landmark[263]
+        
+        yaw = np.degrees(np.arctan2(right_eye.y - left_eye.y, right_eye.x - left_eye.x))
+        pitch = np.degrees(np.arctan2(nose.y - chin.y, 
+                                      np.sqrt((nose.x - chin.x)**2 + (nose.z - chin.z)**2)))
+        
+        return {"yaw": float(yaw), "pitch": float(pitch)}
+    
+    def posture_slouch_estimate(self, pose_landmarks, image_w, image_h):
+        """Calculate slouch angle from shoulders to hips"""
+        left_shoulder = pose_landmarks.landmark[self.mp_holistic.PoseLandmark.LEFT_SHOULDER]
+        right_shoulder = pose_landmarks.landmark[self.mp_holistic.PoseLandmark.RIGHT_SHOULDER]
+        left_hip = pose_landmarks.landmark[self.mp_holistic.PoseLandmark.LEFT_HIP]
+        right_hip = pose_landmarks.landmark[self.mp_holistic.PoseLandmark.RIGHT_HIP]
+        
+        shoulder_mid_x = (left_shoulder.x + right_shoulder.x) / 2
+        shoulder_mid_y = (left_shoulder.y + right_shoulder.y) / 2
+        hip_mid_x = (left_hip.x + right_hip.x) / 2
+        hip_mid_y = (left_hip.y + right_hip.y) / 2
+        
+        dx = shoulder_mid_x - hip_mid_x
+        dy = shoulder_mid_y - hip_mid_y
+        
+        angle = abs(np.degrees(np.arctan2(dx, dy)))
+        return float(angle)
+    
+    def analyze_frame_with_visualization(self, frame):
+        """Analyze frame and draw all metrics on it"""
         image_h, image_w = frame.shape[:2]
-        print(f"[VisionService] Analyzing frame: {image_w}x{image_h}")
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.holistic.process(rgb)
-        print(f"[VisionService] Face detected: {results.face_landmarks is not None}")
         
-        now = time.time()
+        # Initialize metrics
         presence = False
         eye_contact = "unknown"
-        confidence_score = 50  # 0-100
-        slouch_deg = 0.0
-        yaw = 0.0
-        pitch = 0.0
+        confidence_score = 0
+        slouch_angle = 0.0
+        is_good_posture = True
+        head_pose = {"yaw": 0.0, "pitch": 0.0}
         feedback_messages = []
         
-        # Face presence
+        now = time.time()
+        
+        # Draw face mesh if detected
         if results.face_landmarks:
             presence = True
             self.last_face_time = now
-            print(f"[VisionService] ✓ Face landmarks found: {len(results.face_landmarks.landmark)} points")
             
-            # Head direction
-            hd = self.head_direction_estimate(results.face_landmarks, image_w, image_h)
-            if hd:
-                self.yaw_hist.append(hd["yaw"])
-                self.pitch_hist.append(hd["pitch"])
-                yaw = np.mean(self.yaw_hist)
-                pitch = np.mean(self.pitch_hist)
+            # Draw face landmarks
+            self.mp_drawing.draw_landmarks(
+                frame,
+                results.face_landmarks,
+                self.mp_holistic.FACEMESH_CONTOURS,
+                landmark_drawing_spec=None,
+                connection_drawing_spec=self.mp_drawing_styles.get_default_face_mesh_contours_style()
+            )
             
-            # Eye contact check
+            # Calculate head pose
+            head_pose = self.head_direction_estimate(results.face_landmarks, image_w, image_h)
+            yaw, pitch = head_pose['yaw'], head_pose['pitch']
+            
+            # Determine eye contact
             if abs(yaw) < 15 and abs(pitch) < 15:
                 eye_contact = "good"
-                self.last_eye_contact_time = now
-                confidence_score += 20
                 feedback_messages.append("✓ Good eye contact")
-            else:
+            elif abs(yaw) > 30 or abs(pitch) > 30:
                 eye_contact = "away"
-                away_for = now - self.last_eye_contact_time
-                if away_for > self.AWAY_SECONDS_THRESHOLD:
-                    confidence_score -= 15
-                    feedback_messages.append("⚠ Please look at the camera")
+                feedback_messages.append("✗ Looking away")
+            else:
+                eye_contact = "moderate"
+                feedback_messages.append("⚠ Moderate eye contact")
         else:
-            presence = False
-            missing_for = now - self.last_face_time
-            if missing_for > self.MISSING_SECONDS_THRESHOLD:
-                confidence_score = 0
-                feedback_messages.append("❌ You're not in the camera frame")
+            if now - self.last_face_time > 2.0:
+                feedback_messages.append("✗ Not in camera frame")
         
-        # Posture check
+        # Draw pose if detected
         if results.pose_landmarks:
-            sd = self.posture_slouch_estimate(results.pose_landmarks, image_w, image_h)
-            if sd is not None:
-                self.slouch_hist.append(sd)
-                slouch_deg = float(np.mean(self.slouch_hist))
-                
-                if slouch_deg > self.SLOUCH_ANGLE_THRESHOLD:
-                    confidence_score -= 10
-                    feedback_messages.append("⚠ Sit upright - you're slouching")
-                else:
-                    confidence_score += 10
-                    feedback_messages.append("✓ Good posture")
+            # Draw pose landmarks
+            self.mp_drawing.draw_landmarks(
+                frame,
+                results.pose_landmarks,
+                self.mp_holistic.POSE_CONNECTIONS,
+                landmark_drawing_spec=self.mp_drawing_styles.get_default_pose_landmarks_style()
+            )
+            
+            # Calculate posture
+            slouch_angle = self.posture_slouch_estimate(results.pose_landmarks, image_w, image_h)
+            is_good_posture = slouch_angle <= 20.0
+            
+            if is_good_posture:
+                feedback_messages.append("✓ Good posture")
+            else:
+                feedback_messages.append("✗ Slouching detected")
         
-        # Update presence history
-        self.presence_hist.append(1 if presence else 0)
+        # Calculate confidence score
+        confidence_score = 50
+        if presence:
+            confidence_score += 30
+        if eye_contact == "good":
+            confidence_score += 20
+        if is_good_posture:
+            confidence_score += 10
+        confidence_score = max(0, min(100, confidence_score))
         
-        # Overall confidence assessment
-        if confidence_score >= 70:
-            overall_feedback = "😊 You appear confident and engaged"
-        elif confidence_score >= 50:
-            overall_feedback = "😐 Maintain focus and posture"
+        # Overall feedback
+        if confidence_score >= 80:
+            overall = "😊 Excellent! Keep it up"
+        elif confidence_score >= 60:
+            overall = "🙂 Good, minor improvements needed"
+        elif confidence_score >= 40:
+            overall = "😐 Needs improvement"
         else:
-            overall_feedback = "😟 Please improve your presence and engagement"
+            overall = "😟 Please improve your presence and engagement"
         
-        return {
+        # === DRAW ALL METRICS ON FRAME ===
+        
+        # Header background
+        cv2.rectangle(frame, (0, 0), (image_w, 60), (0, 0, 0), -1)
+        
+        # Title
+        cv2.putText(frame, "Interview Behavior Analysis", (10, 30),
+                   cv2.FONT_HERSHEY_BOLD, 0.8, (255, 255, 255), 2)
+        
+        # Confidence bar
+        self.draw_text_with_background(frame, "Confidence:", (10, 55), 
+                                       font_scale=0.5, bg_color=(40, 40, 40))
+        self.draw_confidence_bar(frame, confidence_score, 120, 40)
+        
+        # Status indicators
+        y_offset = 100
+        self.draw_status_indicator(frame, 'good' if presence else 'poor', 
+                                   "Presence", 10, y_offset)
+        self.draw_status_indicator(frame, eye_contact, 
+                                   "Eye Contact", 10, y_offset + 30)
+        self.draw_status_indicator(frame, 'good' if is_good_posture else 'poor', 
+                                   "Posture", 10, y_offset + 60)
+        
+        # Metrics panel (right side)
+        panel_x = image_w - 250
+        panel_y = 80
+        
+        # Draw semi-transparent panel
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (panel_x - 10, panel_y - 10), 
+                     (image_w - 10, panel_y + 200), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        
+        # Metrics text
+        cv2.putText(frame, "METRICS", (panel_x, panel_y), 
+                   cv2.FONT_HERSHEY_BOLD, 0.6, (255, 255, 0), 2)
+        
+        cv2.putText(frame, f"Head Yaw: {head_pose['yaw']:.1f}°", (panel_x, panel_y + 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, f"Head Pitch: {head_pose['pitch']:.1f}°", (panel_x, panel_y + 55),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, f"Slouch: {slouch_angle:.1f}°", (panel_x, panel_y + 80),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, f"Score: {confidence_score}/100", (panel_x, panel_y + 105),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0) if confidence_score >= 70 else (0, 255, 255), 1)
+        
+        # Feedback messages (bottom)
+        feedback_y = image_h - 120
+        cv2.rectangle(frame, (0, feedback_y - 10), (image_w, image_h), (0, 0, 0), -1)
+        
+        cv2.putText(frame, overall, (10, feedback_y + 10),
+                   cv2.FONT_HERSHEY_BOLD, 0.6, (255, 255, 0), 2)
+        
+        for i, msg in enumerate(feedback_messages[:3]):
+            cv2.putText(frame, msg, (10, feedback_y + 40 + i * 25),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Return both annotated frame and metrics
+        return frame, {
             "presence": presence,
             "eye_contact": eye_contact,
-            "confidence_score": max(0, min(100, confidence_score)),
+            "confidence_score": confidence_score,
             "posture": {
-                "slouch_angle": round(slouch_deg, 1),
-                "is_good": slouch_deg <= self.SLOUCH_ANGLE_THRESHOLD
+                "slouch_angle": slouch_angle,
+                "is_good": is_good_posture
             },
-            "head_pose": {
-                "yaw": round(yaw, 1),
-                "pitch": round(pitch, 1)
-            },
+            "head_pose": head_pose,
             "feedback": feedback_messages,
-            "overall": overall_feedback,
-            "timestamp": time.time()
+            "overall": overall,
+            "timestamp": now
         }
     
-    def process_base64_frame(self, base64_image: str) -> Dict:
-        """
-        Process a base64 encoded image from frontend
-        Returns: behavior analysis dict
-        """
+    def process_base64_frame(self, base64_image):
+        """Process base64 image and return metrics (for API)"""
         try:
-            # Decode base64 image
-            img_data = base64.b64decode(base64_image.split(',')[1] if ',' in base64_image else base64_image)
-            nparr = np.frombuffer(img_data, np.uint8)
+            if "base64," in base64_image:
+                base64_image = base64_image.split("base64,")[1]
+            
+            img_bytes = base64.b64decode(base64_image)
+            nparr = np.frombuffer(img_bytes, np.uint8)
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
             if frame is None:
-                print("[VisionService] ERROR: Failed to decode image")
                 return {"error": "Failed to decode image"}
             
-            print(f"[VisionService] Successfully decoded frame: {frame.shape}")
+            # Get metrics without visualization (for API response)
+            _, metrics = self.analyze_frame_with_visualization(frame)
+            return metrics
             
-            # Optional: Save frame for debugging (comment out in production)
-            # cv2.imwrite("/tmp/debug_frame.jpg", frame)
-            
-            return self.analyze_frame(frame)
         except Exception as e:
-            print(f"[VisionService] ERROR: {str(e)}")
             return {"error": str(e)}
     
-    def cleanup(self):
-        """Release resources"""
+    def close(self):
+        """Cleanup resources"""
         self.holistic.close()
