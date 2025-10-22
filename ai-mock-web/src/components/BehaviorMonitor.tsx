@@ -103,6 +103,7 @@ export default function BehaviorMonitor({
     console.log("[BehaviorMonitor] Starting analysis interval");
 
     const analyzeFrame = async () => {
+      console.log("[BehaviorMonitor] analyzeFrame called, isAnalyzingRef.current:", isAnalyzingRef.current);
       if (isAnalyzingRef.current || !videoRef.current || !canvasRef.current) {
         console.log("[BehaviorMonitor] Skipping frame - already analyzing or refs missing");
         return;
@@ -182,7 +183,10 @@ export default function BehaviorMonitor({
       }
     };
 
-    // Analyze every 2 seconds
+    // Run first analysis immediately
+    analyzeFrame();
+    
+    // Then analyze every 2 seconds
     intervalRef.current = setInterval(analyzeFrame, 2000);
 
     return () => {
