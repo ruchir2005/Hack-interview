@@ -101,7 +101,7 @@ To use Audio Mode:
 IF YOU WANT AVATAR MODE TO WORK:
 =================================================================
 
-Fastest option: Add a sample video (Solution 2 above)
+Fastest option: Add a sample video (Solution 2 above)!
 - Takes 5 minutes
 - Works immediately
 - Same video plays for all questions
