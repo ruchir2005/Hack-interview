@@ -1,3 +1,33 @@
+<img width="2048" height="1172" alt="image" src="https://github.com/user-attachments/assets/a67f9d47-f737-4ab7-9382-b91116ff5026" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # AI-Powered Mock Interview Platform
 
 A full-stack, AI-powered mock interview platform that helps users prepare for job interviews. It simulates realistic interview experiences with dynamic question generation based on job roles and companies.
