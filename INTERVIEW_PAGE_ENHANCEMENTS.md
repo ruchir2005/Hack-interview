@@ -13,6 +13,7 @@ Enhanced the Interview Page with a professional split-screen layout, database in
   - Saves resume information (job role, company, experience, job description)
   - Tracks current question and round
   - Easy to upgrade to SQLite, Firebase, or any other database
+  - easy to use
 
 **Usage Example**:
 ```typescript
