@@ -6,7 +6,7 @@ Successfully implemented **Text-to-Speech (TTS)** and **Speech-to-Text (STT)** u
 
 ---
 
-## ✅ What's Implemented
+## What's Implemented
 
 ### 1. **Text-to-Speech (TTS) Hook** 
 **File**: `/hooks/useTTS.ts`
