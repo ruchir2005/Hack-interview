@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test the CV analysis API endpoint
+Test the CV analysis API endpoint!
 """
 import requests
 import base64
